@@ -1,0 +1,16 @@
+{
+  "name": "@meghai/integrations",
+  "version": "0.1.0",
+  "description": "Secure, capability-scoped connectors for Google, Microsoft, and Messaging services in MeghAI",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@meghai/shared-types": "*",
+    "@meghai/security": "*",
+    "@meghai/permissions": "*"
+  }
+}

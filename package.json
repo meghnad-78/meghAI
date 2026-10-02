@@ -8,17 +8,27 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspaces",
-    "build": "tsc --noEmit && npm run build --workspace=@meghai/desktop",
+    "dev": "concurrently -k -p \"[{name}]\" -n \"API,DESKTOP\" -c \"cyan,magenta\" \"npm run api\" \"npm run desktop\"",
+    "dev:all": "concurrently -k -p \"[{name}]\" -n \"API,AGENT,DESKTOP,WEB\" -c \"cyan,blue,magenta,green\" \"npm run api\" \"npm run windows-agent\" \"npm run desktop\" \"npm run web\"",
+    "desktop": "npm run dev --workspace=@meghai/desktop",
+    "web": "npm run dev --workspace=@meghai/web",
+    "api": "tsx apps/api/src/index.ts",
+    "windows-agent": "tsx apps/windows-agent/src/index.ts",
+    "build": "tsc --noEmit && npm run build --workspace=@meghai/desktop && npm run build --workspace=@meghai/web",
     "test": "vitest run",
     "test:watch": "vitest",
+    "benchmark": "tsx scripts/benchmark.ts",
+    "migrate": "tsx scripts/migrate.ts",
+    "setup": "powershell -ExecutionPolicy Bypass -File scripts/setup.ps1",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
-    "clean": "rimraf node_modules packages/*/dist apps/*/dist"
+    "clean": "powershell -ExecutionPolicy Bypass -File scripts/clean.ps1"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
+    "concurrently": "^10.0.5",
+    "tsx": "^4.19.2",
     "typescript": "^5.8.0",
     "vitest": "^3.0.0"
   },

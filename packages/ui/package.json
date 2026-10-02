@@ -1,0 +1,14 @@
+{
+  "name": "@meghai/ui",
+  "version": "0.1.0",
+  "description": "Shared futuristic UI design tokens, theme engine, and helpers for MeghAI",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@meghai/shared-types": "*"
+  }
+}

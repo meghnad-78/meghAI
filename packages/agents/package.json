@@ -1,0 +1,19 @@
+{
+  "name": "@meghai/agents",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@meghai/shared-types": "*",
+    "@meghai/tool-runtime": "*",
+    "@meghai/tool-registry": "*",
+    "@meghai/planner": "*",
+    "@meghai/events": "*"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w"
+  }
+}

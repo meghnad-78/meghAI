@@ -67,6 +67,10 @@ export class MeghAIDatabase {
     this.dbFilePath = path.join(this.dataDir, 'meghai_store.json');
   }
 
+  public getStoragePath(): string {
+    return this.dbFilePath;
+  }
+
   public async init(): Promise<void> {
     if (this.isLoaded) return;
     try {

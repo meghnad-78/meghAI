@@ -1,0 +1,15 @@
+{
+  "name": "@meghai/observability",
+  "version": "0.1.0",
+  "description": "Tracing, token accounting, cost estimation, and telemetry metrics for MeghAI",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@meghai/shared-types": "*",
+    "@meghai/security": "*"
+  }
+}

@@ -128,7 +128,7 @@ export class WindowsAgentService {
 }
 
 // If run directly
-if (process.argv[1] && process.argv[1].endsWith('index.js')) {
+if (process.argv[1] && (process.argv[1].endsWith('index.js') || process.argv[1].endsWith('index.ts'))) {
   const agent = new WindowsAgentService();
   const port = parseInt(process.env['AGENT_PORT'] || '4821', 10);
   agent.start(port).then(p => {

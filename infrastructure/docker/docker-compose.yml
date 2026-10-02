@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 16 with pgvector extension for long-term memory embeddings
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: meghai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: meghai_db
+      POSTGRES_USER: meghai_admin
+      POSTGRES_PASSWORD: meghai_secure_password_local
+    ports:
+      - "5432:5432"
+    volumes:
+      - meghai_pgdata:/var/lib/postgresql/data
+      - ../database/schema.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meghai_admin -d meghai_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for fast event caching and pub/sub
+  redis:
+    image: redis:7-alpine
+    container_name: meghai-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - meghai_redisdata:/data
+
+  # Ollama for 100% offline local AI inference ($0 / ₹0 cost)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: meghai-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - meghai_ollama:/root/.ollama
+
+volumes:
+  meghai_pgdata:
+  meghai_redisdata:
+  meghai_ollama:

@@ -1,0 +1,15 @@
+{
+  "name": "@meghai/browser",
+  "version": "0.1.0",
+  "description": "Secure, profile-isolated browser automation and web extraction engine for MeghAI",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@meghai/shared-types": "*",
+    "@meghai/security": "*"
+  }
+}
