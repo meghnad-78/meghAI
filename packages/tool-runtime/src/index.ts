@@ -21,26 +21,116 @@ export type ToolHandler = (
   context: ToolExecutionContext
 ) => Promise<unknown>;
 
+export type SystemResourceType =
+  | 'KEYBOARD'
+  | 'MOUSE'
+  | 'CLIPBOARD'
+  | 'SCREEN'
+  | 'MICROPHONE'
+  | 'FILE'
+  | 'APPLICATION'
+  | 'BROWSER_PROFILE';
+
+export interface LockLease {
+  lockId: string;
+  resourceType: SystemResourceType;
+  resourceId: string;
+  holderAgent: string;
+  acquiredAt: number;
+  expiresAt: number;
+}
+
 /**
- * Resource Locking Manager (Section 52)
+ * Resource Locking Manager (Section 52 & Phase 1.16)
+ * Prevents multiple agents from concurrently conflicting over system resources.
  */
 export class ResourceLockManager {
-  private activeLocks = new Set<string>();
+  private leases = new Map<string, LockLease>();
 
   public acquire(resourceId: string): boolean {
-    if (this.activeLocks.has(resourceId)) {
-      return false;
+    const res = this.acquireLease('FILE', resourceId, 'anonymous', 30000);
+    return res.success;
+  }
+
+  public acquireLease(
+    resourceType: SystemResourceType,
+    resourceId: string,
+    holderAgent: string,
+    leaseDurationMs = 30000
+  ): { success: boolean; holder?: string; lease?: LockLease; reason?: string } {
+    this.cleanExpiredLeases();
+
+    const key = `${resourceType}:${resourceId}`;
+    const existing = this.leases.get(key);
+
+    if (existing) {
+      if (existing.holderAgent === holderAgent) {
+        // Re-entrant lock extension
+        existing.expiresAt = Date.now() + leaseDurationMs;
+        return { success: true, lease: existing };
+      }
+      return {
+        success: false,
+        holder: existing.holderAgent,
+        reason: `Resource '${key}' is currently held by agent '${existing.holderAgent}'.`
+      };
     }
-    this.activeLocks.add(resourceId);
-    return true;
+
+    const now = Date.now();
+    const lease: LockLease = {
+      lockId: `lock-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      resourceType,
+      resourceId,
+      holderAgent,
+      acquiredAt: now,
+      expiresAt: now + leaseDurationMs
+    };
+
+    this.leases.set(key, lease);
+    return { success: true, lease };
   }
 
   public release(resourceId: string): void {
-    this.activeLocks.delete(resourceId);
+    for (const [key, lease] of this.leases.entries()) {
+      if (lease.resourceId === resourceId || key.endsWith(`:${resourceId}`)) {
+        this.leases.delete(key);
+      }
+    }
+  }
+
+  public releaseLease(resourceType: SystemResourceType, resourceId: string, holderAgent: string): boolean {
+    const key = `${resourceType}:${resourceId}`;
+    const existing = this.leases.get(key);
+    if (!existing) return true;
+    if (existing.holderAgent === holderAgent) {
+      this.leases.delete(key);
+      return true;
+    }
+    return false; // Cannot release another agent's lock
   }
 
   public isLocked(resourceId: string): boolean {
-    return this.activeLocks.has(resourceId);
+    this.cleanExpiredLeases();
+    for (const [key] of this.leases.entries()) {
+      if (key.endsWith(`:${resourceId}`) || key === resourceId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public listActiveLocks(): LockLease[] {
+    this.cleanExpiredLeases();
+    return Array.from(this.leases.values());
+  }
+
+  private cleanExpiredLeases(): void {
+    const now = Date.now();
+    for (const [key, lease] of this.leases.entries()) {
+      if (now > lease.expiresAt) {
+        this.leases.delete(key);
+      }
+    }
   }
 }
 
