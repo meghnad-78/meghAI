@@ -1,0 +1,28 @@
+{
+  "name": "@meghai/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@meghai/shared-types": "*",
+    "@meghai/security": "*",
+    "@meghai/permissions": "*",
+    "@meghai/risk-engine": "*",
+    "@meghai/verification": "*",
+    "@meghai/tool-registry": "*",
+    "@meghai/tool-runtime": "*",
+    "@meghai/database": "*",
+    "@meghai/events": "*",
+    "@meghai/ai-core": "*",
+    "@meghai/model-router": "*",
+    "@meghai/memory": "*",
+    "@meghai/windows": "*"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w",
+    "start": "node dist/index.js"
+  }
+}

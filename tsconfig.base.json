@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@meghai/shared-types": ["packages/shared-types/src/index.ts", "../shared-types/src/index.ts", "../../packages/shared-types/src/index.ts"],
+      "@meghai/security": ["packages/security/src/index.ts", "../security/src/index.ts", "../../packages/security/src/index.ts"],
+      "@meghai/permissions": ["packages/permissions/src/index.ts", "../permissions/src/index.ts", "../../packages/permissions/src/index.ts"],
+      "@meghai/risk-engine": ["packages/risk-engine/src/index.ts", "../risk-engine/src/index.ts", "../../packages/risk-engine/src/index.ts"],
+      "@meghai/verification": ["packages/verification/src/index.ts", "../verification/src/index.ts", "../../packages/verification/src/index.ts"],
+      "@meghai/tool-registry": ["packages/tool-registry/src/index.ts", "../tool-registry/src/index.ts", "../../packages/tool-registry/src/index.ts"],
+      "@meghai/tool-runtime": ["packages/tool-runtime/src/index.ts", "../tool-runtime/src/index.ts", "../../packages/tool-runtime/src/index.ts"],
+      "@meghai/database": ["packages/database/src/index.ts", "../database/src/index.ts", "../../packages/database/src/index.ts"],
+      "@meghai/events": ["packages/events/src/index.ts", "../events/src/index.ts", "../../packages/events/src/index.ts"],
+      "@meghai/ai-core": ["packages/ai-core/src/index.ts", "../ai-core/src/index.ts", "../../packages/ai-core/src/index.ts"],
+      "@meghai/model-router": ["packages/model-router/src/index.ts", "../model-router/src/index.ts", "../../packages/model-router/src/index.ts"],
+      "@meghai/memory": ["packages/memory/src/index.ts", "../memory/src/index.ts", "../../packages/memory/src/index.ts"],
+      "@meghai/windows": ["packages/windows/src/index.ts", "../windows/src/index.ts", "../../packages/windows/src/index.ts"]
+    }
+  }
+}

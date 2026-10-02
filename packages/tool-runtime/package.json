@@ -1,0 +1,20 @@
+{
+  "name": "@meghai/tool-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "dependencies": {
+    "@meghai/shared-types": "*",
+    "@meghai/security": "*",
+    "@meghai/permissions": "*",
+    "@meghai/risk-engine": "*",
+    "@meghai/verification": "*",
+    "@meghai/tool-registry": "*"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w"
+  }
+}

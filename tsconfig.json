@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@meghai/*": ["packages/*/src/index.ts"]
+    },
+    "noEmit": true
+  },
+  "include": [
+    "packages/*/src/**/*",
+    "apps/api/src/**/*",
+    "apps/windows-agent/src/**/*",
+    "tests/**/*"
+  ]
+}
