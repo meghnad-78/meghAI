@@ -4,6 +4,14 @@ import { AICore } from './components/AICore.js';
 import { TopHUD } from './components/TopHUD.js';
 import { ActionTimeline } from './components/ActionTimeline.js';
 import { CommandPalette } from './components/CommandPalette.js';
+import { NotesCenter } from './components/NotesCenter.js';
+import { TaskCenter } from './components/TaskCenter.js';
+import { MemoryCenter } from './components/MemoryCenter.js';
+import { KnowledgeCenter } from './components/KnowledgeCenter.js';
+import { VoiceStudio } from './components/VoiceStudio.js';
+import { RoutineCenter } from './components/RoutineCenter.js';
+import { ProviderCenter } from './components/ProviderCenter.js';
+import { PermissionCenter } from './components/PermissionCenter.js';
 
 interface Message {
   id: string;
@@ -13,6 +21,17 @@ interface Message {
   verificationDetails?: string;
   timestamp: string;
 }
+
+export type ActiveTab =
+  | 'home'
+  | 'notes'
+  | 'tasks'
+  | 'memory'
+  | 'knowledge'
+  | 'voice'
+  | 'routines'
+  | 'providers'
+  | 'permissions';
 
 export const App: React.FC = () => {
   const [aiState, setAiState] = useState<AIState>('READY');
@@ -31,7 +50,7 @@ export const App: React.FC = () => {
   ]);
   const [inputText, setInputText] = useState('');
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'home' | 'notes' | 'tasks' | 'permissions'>('home');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('home');
 
   // Global Keyboard Shortcuts (Ctrl+Space for Palette, Escape to close)
   useEffect(() => {
@@ -168,13 +187,19 @@ export const App: React.FC = () => {
           flexDirection: 'column',
           alignItems: 'center',
           padding: '20px 0',
-          gap: '24px'
+          gap: '14px',
+          overflowY: 'auto'
         }}>
           {[
-            { id: 'home', label: 'Home', icon: '⚡' },
-            { id: 'notes', label: 'Notes', icon: '📝' },
-            { id: 'tasks', label: 'Tasks', icon: '✓' },
-            { id: 'permissions', label: 'Safety', icon: '🛡️' }
+            { id: 'home', label: 'Home (AI Core)', icon: '⚡' },
+            { id: 'notes', label: 'Notes & Facts', icon: '📝' },
+            { id: 'tasks', label: 'Tasks & DAG', icon: '✓' },
+            { id: 'memory', label: 'Memory Center', icon: '🧠' },
+            { id: 'knowledge', label: 'Knowledge Graph', icon: '🌐' },
+            { id: 'voice', label: 'Voice Studio', icon: '🎙️' },
+            { id: 'routines', label: 'Routines & Brief', icon: '⏱️' },
+            { id: 'providers', label: 'Providers & Costs', icon: '☁️' },
+            { id: 'permissions', label: 'Safety & Policy', icon: '🛡️' }
           ].map(tab => (
             <button
               key={tab.id}
@@ -191,7 +216,8 @@ export const App: React.FC = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                flexShrink: 0
               }}
               title={tab.label}
             >
@@ -200,7 +226,7 @@ export const App: React.FC = () => {
           ))}
         </aside>
 
-        {/* Center Canvas: Living AI Core + Conversation */}
+        {/* Center Canvas: Living AI Core or Dedicated Center Panes */}
         <main style={{
           flex: 1,
           display: 'flex',
@@ -209,132 +235,145 @@ export const App: React.FC = () => {
           background: 'radial-gradient(ellipse at 50% 20%, rgba(138, 43, 226, 0.08) 0%, rgba(7, 9, 14, 0) 70%)',
           overflow: 'hidden'
         }}>
-          {/* Living Adaptive AI Core Animation */}
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0 0 0' }}>
-            <AICore state={aiState} size={240} />
-          </div>
+          {activeTab === 'home' && (
+            <>
+              {/* Living Adaptive AI Core Animation */}
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0 0 0' }}>
+                <AICore state={aiState} size={240} />
+              </div>
 
-          {/* Conversation Stream */}
-          <div style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '16px 32px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px'
-          }}>
-            {messages.map(msg => (
-              <div
-                key={msg.id}
-                style={{
-                  alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start',
-                  maxWidth: '75%',
-                  background: msg.sender === 'user' ? 'rgba(0, 240, 255, 0.12)' : 'rgba(15, 23, 42, 0.75)',
-                  border: `1px solid ${msg.sender === 'user' ? 'rgba(0, 240, 255, 0.3)' : 'rgba(255, 255, 255, 0.08)'}`,
-                  borderRadius: '16px',
-                  padding: '14px 18px',
-                  backdropFilter: 'blur(12px)',
-                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)'
-                }}
-              >
-                <div style={{ fontSize: '14px', lineHeight: '1.5', color: '#f1f5f9' }}>
-                  {msg.text}
-                </div>
+              {/* Conversation Stream */}
+              <div style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '16px 32px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '16px'
+              }}>
+                {messages.map(msg => (
+                  <div
+                    key={msg.id}
+                    style={{
+                      alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start',
+                      maxWidth: '75%',
+                      background: msg.sender === 'user' ? 'rgba(0, 240, 255, 0.12)' : 'rgba(15, 23, 42, 0.75)',
+                      border: `1px solid ${msg.sender === 'user' ? 'rgba(0, 240, 255, 0.3)' : 'rgba(255, 255, 255, 0.08)'}`,
+                      borderRadius: '16px',
+                      padding: '14px 18px',
+                      backdropFilter: 'blur(12px)',
+                      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)'
+                    }}
+                  >
+                    <div style={{ fontSize: '14px', lineHeight: '1.5', color: '#f1f5f9', whiteSpace: 'pre-wrap' }}>
+                      {msg.text}
+                    </div>
 
-                {/* Verification Badge */}
-                {msg.verificationStatus && (
-                  <div style={{
-                    marginTop: '8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    fontSize: '11px',
-                    color: msg.verificationStatus === 'VERIFIED' ? '#34d399' : '#f87171'
-                  }}>
-                    <span>{msg.verificationStatus === 'VERIFIED' ? '✓ VERIFIED OUTCOME' : '⚠ UNVERIFIED'}</span>
-                    {msg.verificationDetails && (
-                      <span style={{ color: '#64748b' }}>• {msg.verificationDetails}</span>
+                    {/* Verification Badge */}
+                    {msg.verificationStatus && (
+                      <div style={{
+                        marginTop: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '11px',
+                        color: msg.verificationStatus === 'VERIFIED' ? '#34d399' : '#f87171'
+                      }}>
+                        <span>{msg.verificationStatus === 'VERIFIED' ? '✓ VERIFIED OUTCOME' : '⚠ UNVERIFIED'}</span>
+                        {msg.verificationDetails && (
+                          <span style={{ color: '#64748b' }}>• {msg.verificationDetails}</span>
+                        )}
+                      </div>
                     )}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
 
-          {/* Bottom Floating Command Bar */}
-          <div style={{
-            padding: '16px 32px 24px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}>
-            <div style={{
-              flex: 1,
-              display: 'flex',
-              alignItems: 'center',
-              background: 'rgba(15, 23, 42, 0.85)',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              borderRadius: '24px',
-              padding: '8px 18px',
-              backdropFilter: 'blur(16px)',
-              boxShadow: '0 10px 25px rgba(0, 0, 0, 0.4)'
-            }}>
-              <input
-                type="text"
-                value={inputText}
-                onChange={e => setInputText(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') handleSendMessage(inputText);
-                }}
-                placeholder="Ask Megh, create a note, launch an app... (Ctrl+Space for Palette)"
-                style={{
-                  flex: 1,
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  color: '#f8fafc',
-                  fontSize: '14px',
-                  fontFamily: 'inherit'
-                }}
-              />
-              <button
-                onClick={() => handleSendMessage(inputText)}
-                style={{
-                  background: 'linear-gradient(135deg, #00f0ff, #8a2be2)',
-                  border: 'none',
-                  borderRadius: '16px',
-                  color: '#07090e',
-                  padding: '6px 14px',
-                  fontWeight: 700,
-                  fontSize: '12px',
-                  cursor: 'pointer'
-                }}
-              >
-                Send
-              </button>
-            </div>
-
-            {/* Quick Palette Button */}
-            <button
-              onClick={() => setIsCommandPaletteOpen(true)}
-              style={{
-                width: '42px',
-                height: '42px',
-                borderRadius: '50%',
-                background: 'rgba(15, 23, 42, 0.85)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                color: '#94a3b8',
+              {/* Bottom Floating Command Bar */}
+              <div style={{
+                padding: '16px 32px 24px',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                fontSize: '16px'
-              }}
-              title="Open Universal Command Palette (Ctrl+Space)"
-            >
-              ⌘
-            </button>
-          </div>
+                gap: '12px'
+              }}>
+                <div style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  background: 'rgba(15, 23, 42, 0.85)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  borderRadius: '24px',
+                  padding: '8px 18px',
+                  backdropFilter: 'blur(16px)',
+                  boxShadow: '0 10px 25px rgba(0, 0, 0, 0.4)'
+                }}>
+                  <input
+                    type="text"
+                    value={inputText}
+                    onChange={e => setInputText(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleSendMessage(inputText);
+                    }}
+                    placeholder="Ask Megh, create a note, daily brief... (Ctrl+Space for Palette)"
+                    style={{
+                      flex: 1,
+                      background: 'transparent',
+                      border: 'none',
+                      outline: 'none',
+                      color: '#f8fafc',
+                      fontSize: '14px',
+                      fontFamily: 'inherit'
+                    }}
+                  />
+                  <button
+                    onClick={() => handleSendMessage(inputText)}
+                    style={{
+                      background: 'linear-gradient(135deg, #00f0ff, #8a2be2)',
+                      border: 'none',
+                      borderRadius: '16px',
+                      color: '#07090e',
+                      padding: '6px 14px',
+                      fontWeight: 700,
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Send
+                  </button>
+                </div>
+
+                {/* Quick Palette Button */}
+                <button
+                  onClick={() => setIsCommandPaletteOpen(true)}
+                  style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '50%',
+                    background: 'rgba(15, 23, 42, 0.85)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    color: '#94a3b8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    fontSize: '16px'
+                  }}
+                  title="Open Universal Command Palette (Ctrl+Space)"
+                >
+                  ⌘
+                </button>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'notes' && <NotesCenter />}
+          {activeTab === 'tasks' && <TaskCenter />}
+          {activeTab === 'memory' && <MemoryCenter />}
+          {activeTab === 'knowledge' && <KnowledgeCenter />}
+          {activeTab === 'voice' && <VoiceStudio />}
+          {activeTab === 'routines' && <RoutineCenter />}
+          {activeTab === 'providers' && <ProviderCenter />}
+          {activeTab === 'permissions' && <PermissionCenter />}
         </main>
 
         {/* Right Panel: Action Timeline */}

@@ -101,3 +101,80 @@ export class VoiceCatalog {
     }
   }
 }
+
+import type { PersonalityMode, VoiceSettings } from '@meghai/shared-types';
+
+/**
+ * Personality Studio (Section 69, 70, 98)
+ * Manages MeghAI's tone, pacing, and behavioral personality presets.
+ */
+export class PersonalityStudio {
+  private static readonly PROMPTS: Record<PersonalityMode, { description: string; instruction: string }> = {
+    PROFESSIONAL: {
+      description: 'Concise, structured, and focused on executive clarity and precision.',
+      instruction: 'Maintain a professional, highly articulate tone. Be direct, clear, and action-oriented.'
+    },
+    WARM: {
+      description: 'Supportive, conversational, and naturally engaging.',
+      instruction: 'Respond with warmth and empathy. Be courteous, accessible, and reassuring.'
+    },
+    FUTURISTIC_COMPANION: {
+      description: 'High-tech, deeply proactive, and razor-sharp intelligence partner.',
+      instruction: 'Act as an omnipresent futuristic operating layer. Provide swift insights and proactive assistance.'
+    },
+    CALM_ASSISTANT: {
+      description: 'Deliberate, peaceful, minimalist, and non-distracting.',
+      instruction: 'Adopt a steady, peaceful cadence. Keep explanations uncluttered and grounding.'
+    }
+  };
+
+  public static getPersonalityPrompt(mode: PersonalityMode): { description: string; instruction: string } {
+    return this.PROMPTS[mode] || this.PROMPTS.FUTURISTIC_COMPANION;
+  }
+}
+
+/**
+ * Voice Settings & Synthesis Manager
+ */
+export class VoiceSettingsManager {
+  private settings: VoiceSettings;
+
+  constructor(initialSettings?: Partial<VoiceSettings>) {
+    this.settings = {
+      selectedVoiceId: initialSettings?.selectedVoiceId || 'local-david',
+      speechRate: initialSettings?.speechRate ?? 1.0,
+      pitch: initialSettings?.pitch ?? 1.0,
+      volume: initialSettings?.volume ?? 1.0,
+      personalityMode: initialSettings?.personalityMode || 'FUTURISTIC_COMPANION'
+    };
+  }
+
+  public getSettings(): VoiceSettings {
+    return { ...this.settings };
+  }
+
+  public updateSettings(updates: Partial<VoiceSettings>): VoiceSettings {
+    this.settings = {
+      ...this.settings,
+      ...updates
+    };
+    return this.getSettings();
+  }
+
+  public previewVoice(voiceId: string, text = 'Greetings. I am MeghAI, your personal operating layer.'): {
+    voiceId: string;
+    text: string;
+    speechRate: number;
+    pitch: number;
+    status: 'READY' | 'SYNTHESIZED';
+  } {
+    return {
+      voiceId,
+      text,
+      speechRate: this.settings.speechRate,
+      pitch: this.settings.pitch,
+      status: 'SYNTHESIZED'
+    };
+  }
+}
+

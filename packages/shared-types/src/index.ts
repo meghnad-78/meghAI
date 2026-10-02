@@ -478,3 +478,47 @@ export interface VoiceProfile {
   sampleAudioUrl?: string;
   isAvailable: boolean;
 }
+
+export interface VoiceSettings {
+  selectedVoiceId: string;
+  speechRate: number; // 0.5 to 2.0 (default 1.0)
+  pitch: number; // 0.5 to 1.5 (default 1.0)
+  volume: number; // 0.0 to 1.0 (default 1.0)
+  personalityMode: PersonalityMode;
+}
+
+// ---------------------------------------------------------------------------
+// 13. Routines & Proactivity (Section 94, 95)
+// ---------------------------------------------------------------------------
+export interface RoutineEntry {
+  id: string;
+  name: string;
+  description: string;
+  triggerType: 'SCHEDULE' | 'MANUAL' | 'SYSTEM_EVENT';
+  scheduleCron?: string; // e.g. "0 8 * * *"
+  actions: string[];
+  isEnabled: boolean;
+  lastRunAt?: string;
+  nextRunAt?: string;
+}
+
+export interface DailyBrief {
+  id: string;
+  timestamp: string;
+  greeting: string;
+  pendingTasks: TaskEntry[];
+  upcomingEvents: Array<{ title: string; time: string; location?: string }>;
+  systemHealth: { status: 'HEALTHY' | 'WARNING' | 'ERROR'; details: string };
+  recommendedActions: string[];
+  verificationStatus: 'VERIFIED' | 'UNVERIFIED';
+}
+
+export interface CostSummary {
+  totalTokensUsed: number;
+  totalCostUsd: number;
+  totalCostInr: number;
+  localOperationsCount: number;
+  cloudOperationsCount: number;
+  zeroCostSavingsInr: number;
+}
+
