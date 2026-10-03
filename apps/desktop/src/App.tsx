@@ -61,8 +61,20 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
 
   // Selected Personality
-  const [selectedPersonalityId, setSelectedPersonalityId] = useState<string>('futuristic');
-  const [selectedPersonalityName, setSelectedPersonalityName] = useState<string>('Futuristic');
+  const [selectedPersonalityId, setSelectedPersonalityId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('meghai_selected_personality_id') || 'futuristic';
+    } catch {
+      return 'futuristic';
+    }
+  });
+  const [selectedPersonalityName, setSelectedPersonalityName] = useState<string>(() => {
+    try {
+      return localStorage.getItem('meghai_selected_personality_name') || 'Futuristic';
+    } catch {
+      return 'Futuristic';
+    }
+  });
   const [personalityStyle, setPersonalityStyle] = useState<string>('orbital');
 
   // Selected Providers & Voices (Loaded from persistent store + localStorage cache)
@@ -80,8 +92,20 @@ export const App: React.FC = () => {
       return 'llama3.2:latest';
     }
   });
-  const [selectedVoiceId, setSelectedVoiceId] = useState<string>('onecore-heera');
-  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('Heera');
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('meghai_selected_voice_id') || 'onecore-heera';
+    } catch {
+      return 'onecore-heera';
+    }
+  });
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string>(() => {
+    try {
+      return localStorage.getItem('meghai_selected_voice_name') || 'Heera';
+    } catch {
+      return 'Heera';
+    }
+  });
 
   // Global Keyboard Shortcuts (Ctrl+Space for Palette)
   useEffect(() => {
@@ -355,6 +379,10 @@ export const App: React.FC = () => {
     const cleanName = voiceId.replace(/^onecore-|^local-/, '');
     setSelectedVoiceName(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
     try {
+      localStorage.setItem('meghai_selected_voice_id', voiceId);
+      localStorage.setItem('meghai_selected_voice_name', cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
+    } catch {}
+    try {
       await fetch('/api/v1/voice/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -611,6 +639,10 @@ export const App: React.FC = () => {
           setSelectedPersonalityId(profile.id);
           setSelectedPersonalityName(profile.name);
           setPersonalityStyle(profile.visualStyle);
+          try {
+            localStorage.setItem('meghai_selected_personality_id', profile.id);
+            localStorage.setItem('meghai_selected_personality_name', profile.name);
+          } catch {}
         }}
         onClose={() => setIsPersonalitySelectorOpen(false)}
       />

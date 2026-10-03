@@ -81,8 +81,16 @@ try {
           else if (culture === 'en-GB') tone = 'British English natural tone';
           else if (culture === 'en-US') tone = 'American English natural tone';
 
+          const characteristics: string[] = culture === 'en-IN'
+            ? ['warm', 'natural', 'articulate', 'conversational']
+            : culture === 'en-GB'
+            ? ['refined', 'expressive', 'articulate', 'narrator']
+            : ['natural', 'clear', 'confident', 'conversational'];
+
           return {
             id: shortId,
+            voiceId: shortId,
+            providerVoiceId: item.Id || item.DisplayName,
             name: rawName,
             provider: 'windows-onecore',
             language: culture,
@@ -95,9 +103,11 @@ try {
               speedSupport: true,
               pitchSupport: true,
               emotionSupport: false,
-              styleSupport: true,
+              styleSupport: false,
               streamingSupport: false
             },
+            supportedControls: ['speed', 'pitch'],
+            characteristics,
             supportsPreview: true,
             supportsStreaming: false,
             tone,
@@ -255,7 +265,7 @@ try {
     speedSupport: true,
     pitchSupport: true,
     emotionSupport: false,
-    styleSupport: true,
+    styleSupport: false,
     streamingSupport: false
   };
 
@@ -264,6 +274,8 @@ try {
     return [
       {
         id: 'onecore-heera',
+        voiceId: 'onecore-heera',
+        providerVoiceId: 'Microsoft Heera',
         name: 'Microsoft Heera',
         provider: 'windows-onecore',
         language: 'en-IN',
@@ -273,6 +285,8 @@ try {
         requiresApiKey: false,
         naturalness: 'neural',
         capabilities: caps,
+        supportedControls: ['speed', 'pitch'],
+        characteristics: ['warm', 'natural', 'articulate', 'conversational'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Warm natural Indian English',
@@ -280,6 +294,8 @@ try {
       },
       {
         id: 'onecore-ravi',
+        voiceId: 'onecore-ravi',
+        providerVoiceId: 'Microsoft Ravi',
         name: 'Microsoft Ravi',
         provider: 'windows-onecore',
         language: 'en-IN',
@@ -289,6 +305,8 @@ try {
         requiresApiKey: false,
         naturalness: 'neural',
         capabilities: caps,
+        supportedControls: ['speed', 'pitch'],
+        characteristics: ['clear', 'articulate', 'calm', 'professional'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Articulate Indian English',
@@ -296,6 +314,8 @@ try {
       },
       {
         id: 'onecore-george',
+        voiceId: 'onecore-george',
+        providerVoiceId: 'Microsoft George',
         name: 'Microsoft George',
         provider: 'windows-onecore',
         language: 'en-GB',
@@ -305,6 +325,8 @@ try {
         requiresApiKey: false,
         naturalness: 'neural',
         capabilities: caps,
+        supportedControls: ['speed', 'pitch'],
+        characteristics: ['refined', 'british', 'authoritative', 'narrator'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Refined British English',
@@ -312,6 +334,8 @@ try {
       },
       {
         id: 'onecore-susan',
+        voiceId: 'onecore-susan',
+        providerVoiceId: 'Microsoft Susan',
         name: 'Microsoft Susan',
         provider: 'windows-onecore',
         language: 'en-GB',
@@ -321,6 +345,8 @@ try {
         requiresApiKey: false,
         naturalness: 'neural',
         capabilities: caps,
+        supportedControls: ['speed', 'pitch'],
+        characteristics: ['expressive', 'british', 'warm', 'conversational'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Expressive British English',
@@ -328,6 +354,8 @@ try {
       },
       {
         id: 'onecore-david',
+        voiceId: 'onecore-david',
+        providerVoiceId: 'Microsoft David',
         name: 'Microsoft David',
         provider: 'windows-onecore',
         language: 'en-US',
@@ -337,6 +365,8 @@ try {
         requiresApiKey: false,
         naturalness: 'neural',
         capabilities: caps,
+        supportedControls: ['speed', 'pitch'],
+        characteristics: ['natural', 'american', 'confident', 'clear'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Natural American English male',
@@ -344,6 +374,8 @@ try {
       },
       {
         id: 'onecore-zira',
+        voiceId: 'onecore-zira',
+        providerVoiceId: 'Microsoft Zira',
         name: 'Microsoft Zira',
         provider: 'windows-onecore',
         language: 'en-US',
@@ -353,6 +385,8 @@ try {
         requiresApiKey: false,
         naturalness: 'neural',
         capabilities: caps,
+        supportedControls: ['speed', 'pitch'],
+        characteristics: ['clear', 'american', 'bright', 'professional'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Clear American English female',
@@ -360,6 +394,8 @@ try {
       },
       {
         id: 'onecore-mark',
+        voiceId: 'onecore-mark',
+        providerVoiceId: 'Microsoft Mark',
         name: 'Microsoft Mark',
         provider: 'windows-onecore',
         language: 'en-US',
@@ -369,6 +405,8 @@ try {
         requiresApiKey: false,
         naturalness: 'neural',
         capabilities: caps,
+        supportedControls: ['speed', 'pitch'],
+        characteristics: ['dynamic', 'american', 'energetic', 'confident'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Dynamic American English male',
@@ -376,6 +414,8 @@ try {
       },
       {
         id: 'onecore-hazel',
+        voiceId: 'onecore-hazel',
+        providerVoiceId: 'Microsoft Hazel',
         name: 'Microsoft Hazel',
         provider: 'windows-onecore',
         language: 'en-GB',
@@ -385,6 +425,8 @@ try {
         requiresApiKey: false,
         naturalness: 'neural',
         capabilities: caps,
+        supportedControls: ['speed', 'pitch'],
+        characteristics: ['gentle', 'british', 'soft', 'calm'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Gentle British English female',

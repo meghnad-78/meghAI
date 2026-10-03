@@ -536,6 +536,7 @@ export interface VoiceCapability {
 
 export interface VoiceProfile {
   id: string;
+  voiceId?: string;
   name: string;
   displayName?: string;
   provider: VoiceProviderId;
@@ -552,7 +553,10 @@ export interface VoiceProfile {
   sampleAudioUrl?: string;
   supportsPreview?: boolean;
   supportsStreaming?: boolean;
+  supportedControls?: Array<'speed' | 'pitch' | 'stability' | 'similarity' | 'style' | 'emotion' | 'expressiveness' | string>;
+  characteristics?: string[];
   requiresApiKey?: boolean;
+  requiresCredential?: boolean;
   isAvailable: boolean;
   available?: boolean;
   availabilityReason?: string;
@@ -566,7 +570,10 @@ export interface VoiceSettings {
   speechRate: number; // 0.5 to 2.0 (default 1.0)
   pitch: number; // 0.5 to 1.5 (default 1.0)
   volume: number; // 0.0 to 1.0 (default 1.0)
-  personalityMode: PersonalityMode;
+  stability?: number; // 0.0 to 1.0 (ElevenLabs)
+  similarity?: number; // 0.0 to 1.0 (ElevenLabs similarity_boost)
+  style?: number; // 0.0 to 1.0 (ElevenLabs style exaggeration)
+  personalityMode?: PersonalityMode;
   autoSpeak: AutoSpeakMode;
 }
 
@@ -575,6 +582,9 @@ export interface TTSOptions {
   speechRate?: number; // 0.5 to 2.0 (default 1.0)
   pitch?: number;      // 0.5 to 1.5 (default 1.0)
   volume?: number;     // 0.0 to 1.0 (default 1.0)
+  stability?: number;  // 0.0 to 1.0 (ElevenLabs)
+  similarity?: number; // 0.0 to 1.0 (ElevenLabs similarity_boost)
+  style?: number;      // 0.0 to 1.0 (ElevenLabs style exaggeration)
   outputFormat?: 'wav' | 'mp3';
   allowFallback?: boolean;
 }
@@ -712,8 +722,10 @@ export interface PersonalityProfile {
   empathyStyle: 'objective' | 'supportive' | 'calm' | 'expressive';
   technicalDepth: 'high' | 'balanced' | 'simplified';
   proactivity: 'low' | 'medium' | 'high';
-  visualStyle: 'precise' | 'soft' | 'orbital' | 'breathing' | 'minimal';
+  visualStyle: 'precise' | 'soft' | 'orbital' | 'breathing' | 'minimal' | string;
   preferredVoiceTags: string[];
+  suggestedVoiceCharacteristics?: string[];
+  suggestedVoiceIds?: string[];
   systemInstruction: string;
 }
 

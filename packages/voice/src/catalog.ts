@@ -87,18 +87,28 @@ export class VoiceCatalogService {
 
   public listVoices(filter?: VoiceFilterOptions): VoiceProfile[] {
     const rawList = this.voiceCache.length > 0 ? this.voiceCache : this.getSeedCatalog();
-    const enrichedList = rawList.map(v => ({
-      ...v,
-      voiceId: v.id,
-      requiresCredential: v.requiresApiKey ?? (v.provider !== 'windows-sapi' && v.provider !== 'windows-onecore' && (v.provider as any) !== 'local'),
-      supportedControls: v.capabilities ? [
-        ...(v.capabilities.speedSupport ? ['speed'] : []),
-        ...(v.capabilities.pitchSupport ? ['pitch'] : []),
-        ...(v.capabilities.emotionSupport ? ['emotion'] : []),
-        ...(v.capabilities.styleSupport ? ['style'] : []),
-        ...(v.capabilities.streamingSupport ? ['streaming'] : [])
-      ] : ['speed', 'pitch']
-    }));
+    const enrichedList = rawList.map(v => {
+      const supportedControls = v.supportedControls || (
+        v.provider === 'elevenlabs'
+          ? ['speed', 'stability', 'similarity', 'style']
+          : v.provider === 'openai' || v.provider === 'windows-sapi' || (v.provider as any) === 'local'
+          ? ['speed']
+          : ['speed', 'pitch']
+      );
+
+      const characteristics = v.characteristics || (
+        v.tone ? v.tone.toLowerCase().split(/[\s,&-]+/).filter(w => w.length > 3).slice(0, 4) : ['natural', 'clear']
+      );
+
+      return {
+        ...v,
+        voiceId: v.id,
+        providerVoiceId: v.providerVoiceId || (v.style && v.provider === 'elevenlabs' ? v.style : v.name),
+        requiresCredential: v.requiresCredential ?? v.requiresApiKey ?? (v.provider !== 'windows-sapi' && v.provider !== 'windows-onecore' && (v.provider as any) !== 'local'),
+        supportedControls,
+        characteristics
+      };
+    });
 
     if (!filter) return enrichedList;
 
@@ -108,16 +118,22 @@ export class VoiceCatalogService {
       }
       if (filter.provider) {
         const target = filter.provider.toLowerCase();
-        // Support 'local' matching both windows-sapi and windows-onecore
-        if (target === 'local') {
+        if (target === 'local' || target === 'windows-sapi') {
           if (v.provider !== 'windows-sapi' && (v.provider as any) !== 'local') {
             return false;
           }
+        } else if (target === 'windows-onecore') {
+          if (v.provider !== 'windows-onecore') return false;
         } else if (
-          (target === 'google' || target === 'google-cloud' || target === 'google-cloud-tts') &&
-          (v.provider === 'google-cloud' || (v.provider as any) === 'google' || (v.provider as any) === 'google-cloud-tts')
+          target === 'google' || target === 'google-cloud' || target === 'google-cloud-tts'
         ) {
-          // match
+          if (v.provider !== 'google-cloud' && (v.provider as any) !== 'google' && (v.provider as any) !== 'google-cloud-tts') {
+            return false;
+          }
+        } else if (target === 'elevenlabs') {
+          if (v.provider !== 'elevenlabs') return false;
+        } else if (target === 'openai') {
+          if (v.provider !== 'openai') return false;
         } else if (v.provider !== target) {
           return false;
         }
@@ -215,7 +231,9 @@ export class VoiceCatalogService {
 
     if (typeof (provider as any).synthesizeStream === 'function') {
       try {
-        return await (provider as any).synthesizeStream(text, options);
+        const res = await (provider as any).synthesizeStream(text, options);
+        if (res && res.stream) return res.stream;
+        return res;
       } catch (err: any) {
         console.warn(`[VoiceCatalog] Stream synthesis failed on '${provider.id}':`, err.message);
         if (!(options.allowFallback ?? true)) throw err;

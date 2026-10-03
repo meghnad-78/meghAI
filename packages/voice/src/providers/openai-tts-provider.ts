@@ -142,6 +142,8 @@ export class OpenAITTSProvider implements TTSProvider {
     return [
       {
         id: 'openai-alloy',
+        voiceId: 'openai-alloy',
+        providerVoiceId: 'alloy',
         name: 'Alloy',
         displayName: 'OpenAI Alloy',
         provider: 'openai',
@@ -152,16 +154,21 @@ export class OpenAITTSProvider implements TTSProvider {
         style: 'Modern digital assistant',
         isAvailable: Boolean(process.env['OPENAI_API_KEY']),
         requiresApiKey: true,
+        requiresCredential: true,
+        supportedControls: ['speed'],
+        characteristics: ['balanced', 'versatile', 'clear', 'neutral'],
         capabilities: {
           speedSupport: true,
           pitchSupport: false,
           emotionSupport: true,
-          styleSupport: true,
+          styleSupport: false,
           streamingSupport: true
         }
       },
       {
         id: 'openai-echo',
+        voiceId: 'openai-echo',
+        providerVoiceId: 'echo',
         name: 'Echo',
         displayName: 'OpenAI Echo',
         provider: 'openai',
@@ -172,16 +179,21 @@ export class OpenAITTSProvider implements TTSProvider {
         style: 'Friendly counselor',
         isAvailable: Boolean(process.env['OPENAI_API_KEY']),
         requiresApiKey: true,
+        requiresCredential: true,
+        supportedControls: ['speed'],
+        characteristics: ['warm', 'conversational', 'resonant', 'calm'],
         capabilities: {
           speedSupport: true,
           pitchSupport: false,
           emotionSupport: true,
-          styleSupport: true,
+          styleSupport: false,
           streamingSupport: true
         }
       },
       {
         id: 'openai-fable',
+        voiceId: 'openai-fable',
+        providerVoiceId: 'fable',
         name: 'Fable',
         displayName: 'OpenAI Fable',
         provider: 'openai',
@@ -192,16 +204,21 @@ export class OpenAITTSProvider implements TTSProvider {
         style: 'Storyteller',
         isAvailable: Boolean(process.env['OPENAI_API_KEY']),
         requiresApiKey: true,
+        requiresCredential: true,
+        supportedControls: ['speed'],
+        characteristics: ['expressive', 'lyrical', 'narrator', 'british'],
         capabilities: {
           speedSupport: true,
           pitchSupport: false,
           emotionSupport: true,
-          styleSupport: true,
+          styleSupport: false,
           streamingSupport: true
         }
       },
       {
         id: 'openai-onyx',
+        voiceId: 'openai-onyx',
+        providerVoiceId: 'onyx',
         name: 'Onyx',
         displayName: 'OpenAI Onyx',
         provider: 'openai',
@@ -212,16 +229,21 @@ export class OpenAITTSProvider implements TTSProvider {
         style: 'Executive advisor',
         isAvailable: Boolean(process.env['OPENAI_API_KEY']),
         requiresApiKey: true,
+        requiresCredential: true,
+        supportedControls: ['speed'],
+        characteristics: ['deep', 'authoritative', 'commanding', 'confident'],
         capabilities: {
           speedSupport: true,
           pitchSupport: false,
           emotionSupport: true,
-          styleSupport: true,
+          styleSupport: false,
           streamingSupport: true
         }
       },
       {
         id: 'openai-nova',
+        voiceId: 'openai-nova',
+        providerVoiceId: 'nova',
         name: 'Nova',
         displayName: 'OpenAI Nova',
         provider: 'openai',
@@ -232,16 +254,21 @@ export class OpenAITTSProvider implements TTSProvider {
         style: 'Personal companion',
         isAvailable: Boolean(process.env['OPENAI_API_KEY']),
         requiresApiKey: true,
+        requiresCredential: true,
+        supportedControls: ['speed'],
+        characteristics: ['bright', 'energetic', 'helpful', 'warm'],
         capabilities: {
           speedSupport: true,
           pitchSupport: false,
           emotionSupport: true,
-          styleSupport: true,
+          styleSupport: false,
           streamingSupport: true
         }
       },
       {
         id: 'openai-shimmer',
+        voiceId: 'openai-shimmer',
+        providerVoiceId: 'shimmer',
         name: 'Shimmer',
         displayName: 'OpenAI Shimmer',
         provider: 'openai',
@@ -252,11 +279,14 @@ export class OpenAITTSProvider implements TTSProvider {
         style: 'Gentle guide',
         isAvailable: Boolean(process.env['OPENAI_API_KEY']),
         requiresApiKey: true,
+        requiresCredential: true,
+        supportedControls: ['speed'],
+        characteristics: ['clear', 'optimistic', 'soothing', 'gentle'],
         capabilities: {
           speedSupport: true,
           pitchSupport: false,
           emotionSupport: true,
-          styleSupport: true,
+          styleSupport: false,
           streamingSupport: true
         }
       }

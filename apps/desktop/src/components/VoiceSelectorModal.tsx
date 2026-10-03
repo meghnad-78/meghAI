@@ -7,13 +7,15 @@ import { tokens } from '../theme/tokens.js';
 interface VoiceItem {
   id: string;
   name: string;
-  provider: 'windows-onecore' | 'windows-sapi' | 'google-cloud' | 'elevenlabs';
+  provider: 'windows-onecore' | 'windows-sapi' | 'google-cloud' | 'elevenlabs' | 'openai';
   language: string;
   gender: 'female' | 'male' | 'neutral';
   naturalness: 'robotic' | 'clear' | 'natural' | 'lifelike';
   accent?: string;
   available: boolean;
   isCustom?: boolean;
+  characteristics?: string[];
+  supportedControls?: ('speed' | 'pitch' | 'stability' | 'similarity' | 'style')[];
 }
 
 interface VoiceSelectorModalProps {
@@ -62,9 +64,11 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
   };
 
   const filteredVoices = voices.filter(v => {
-    const matchesSearch = v.name.toLowerCase().includes(search.toLowerCase()) ||
-      v.language.toLowerCase().includes(search.toLowerCase()) ||
-      (v.accent && v.accent.toLowerCase().includes(search.toLowerCase()));
+    const q = search.toLowerCase();
+    const matchesSearch = v.name.toLowerCase().includes(q) ||
+      v.language.toLowerCase().includes(q) ||
+      (v.accent && v.accent.toLowerCase().includes(q)) ||
+      (v.characteristics && v.characteristics.some(c => c.toLowerCase().includes(q)));
     const matchesProvider = selectedProvider === 'all' || v.provider === selectedProvider;
     return matchesSearch && matchesProvider;
   });
@@ -135,7 +139,7 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
         <div style={{ padding: '12px 24px', borderBottom: `1px solid ${tokens.colors.border.subtle}`, display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <input
             type="text"
-            placeholder="Search voices, languages (e.g. Heera, Hindi, English)..."
+            placeholder="Search voices, characteristics, languages (e.g. Heera, Hindi, calm, warm)..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{
@@ -156,7 +160,8 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
               { id: 'windows-onecore', label: 'OneCore (WinRT)' },
               { id: 'windows-sapi', label: 'SAPI' },
               { id: 'google-cloud', label: 'Google Cloud' },
-              { id: 'elevenlabs', label: 'ElevenLabs' }
+              { id: 'elevenlabs', label: 'ElevenLabs' },
+              { id: 'openai', label: 'OpenAI' }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -221,6 +226,25 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
                     <span style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted }}>
                       {v.language} {v.accent ? `• ${v.accent}` : ''} • {v.naturalness}
                     </span>
+                    {v.characteristics && v.characteristics.length > 0 && (
+                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '3px' }}>
+                        {v.characteristics.slice(0, 3).map((ch, i) => (
+                          <span
+                            key={i}
+                            style={{
+                              fontSize: '9px',
+                              padding: '1px 5px',
+                              borderRadius: tokens.radii.pill,
+                              background: 'rgba(255, 255, 255, 0.05)',
+                              color: tokens.colors.text.muted,
+                              border: `1px solid ${tokens.colors.border.subtle}`
+                            }}
+                          >
+                            {ch}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 

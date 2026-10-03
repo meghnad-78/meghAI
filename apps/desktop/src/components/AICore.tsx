@@ -171,6 +171,30 @@ export const AICore: React.FC<AICoreProps> = ({
               pulseRate: 0.9
             };
           }
+          if (personalityStyle === 'technical') {
+            return {
+              primary: 'rgba(245, 158, 11, ',
+              secondary: 'rgba(56, 189, 248, ',
+              glow: 'rgba(245, 158, 11, 0.22)',
+              pulseRate: 1.4
+            };
+          }
+          if (personalityStyle === 'network') {
+            return {
+              primary: 'rgba(168, 85, 247, ',
+              secondary: 'rgba(52, 211, 153, ',
+              glow: 'rgba(168, 85, 247, 0.24)',
+              pulseRate: 1.2
+            };
+          }
+          if (personalityStyle === 'dynamic') {
+            return {
+              primary: 'rgba(0, 240, 255, ',
+              secondary: 'rgba(244, 63, 94, ',
+              glow: 'rgba(0, 240, 255, 0.25)',
+              pulseRate: 1.6
+            };
+          }
           // Default: orbital (futuristic companion)
           return {
             primary: 'rgba(0, 240, 255, ',

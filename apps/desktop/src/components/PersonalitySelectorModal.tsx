@@ -229,7 +229,33 @@ export const PersonalitySelectorModal: React.FC<PersonalitySelectorModalProps> =
                   <span style={{ fontSize: '10px', color: tokens.colors.text.muted, backgroundColor: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: tokens.radii.xs }}>
                     Verbosity: {profile.verbosity}
                   </span>
+                  {profile.technicalDepth && (
+                    <span style={{ fontSize: '10px', color: tokens.colors.text.muted, backgroundColor: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: tokens.radii.xs }}>
+                      Tech: {profile.technicalDepth}
+                    </span>
+                  )}
                 </div>
+
+                {profile.suggestedVoiceCharacteristics && profile.suggestedVoiceCharacteristics.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                    <span style={{ fontSize: '10px', color: tokens.colors.text.faint }}>Suggested Voice:</span>
+                    {profile.suggestedVoiceCharacteristics.map((trait, idx) => (
+                      <span
+                        key={idx}
+                        style={{
+                          fontSize: '9px',
+                          padding: '1px 5px',
+                          borderRadius: tokens.radii.pill,
+                          backgroundColor: 'rgba(0, 240, 255, 0.08)',
+                          color: tokens.colors.accent.cyan,
+                          border: `1px solid ${tokens.colors.border.accent}`
+                        }}
+                      >
+                        {trait}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}

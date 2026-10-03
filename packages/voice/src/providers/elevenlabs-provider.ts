@@ -34,6 +34,8 @@ export class ElevenLabsTTSProvider implements TTSProvider {
           if (Array.isArray(data.voices) && data.voices.length > 0) {
             return data.voices.map((v: any) => ({
               id: `eleven-${v.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+              voiceId: `eleven-${v.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+              providerVoiceId: v.voice_id,
               name: `ElevenLabs ${v.name}`,
               provider: 'elevenlabs' as const,
               language: v.labels?.accent || 'en-US',
@@ -46,13 +48,21 @@ export class ElevenLabsTTSProvider implements TTSProvider {
                 styleSupport: true,
                 streamingSupport: true
               },
+              supportedControls: ['speed', 'stability', 'similarity', 'style'],
+              characteristics: [
+                v.labels?.description?.toLowerCase(),
+                v.labels?.use_case?.toLowerCase(),
+                v.labels?.accent?.toLowerCase(),
+                'generative'
+              ].filter(Boolean),
               supportsPreview: true,
               supportsStreaming: true,
               tone: v.labels?.description || v.labels?.use_case || 'Authentic expressive voice',
               style: v.voice_id,
               isAvailable: true,
               available: true,
-              requiresApiKey: true
+              requiresApiKey: true,
+              requiresCredential: true
             }));
           }
         }
@@ -98,8 +108,10 @@ export class ElevenLabsTTSProvider implements TTSProvider {
         text: cleanText,
         model_id: 'eleven_turbo_v2_5',
         voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75
+          stability: options.stability ?? 0.5,
+          similarity_boost: options.similarity ?? 0.75,
+          style: options.style ?? 0.0,
+          use_speaker_boost: true
         }
       })
     });
@@ -165,8 +177,10 @@ export class ElevenLabsTTSProvider implements TTSProvider {
         text: cleanText,
         model_id: 'eleven_turbo_v2_5',
         voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75
+          stability: options.stability ?? 0.5,
+          similarity_boost: options.similarity ?? 0.75,
+          style: options.style ?? 0.0,
+          use_speaker_boost: true
         }
       })
     });
@@ -246,26 +260,37 @@ export class ElevenLabsTTSProvider implements TTSProvider {
       { id: 'eleven-sarah', name: 'Sarah', lang: 'en-US', gender: 'female', tone: 'Cheerfully upbeat & professional', externalId: 'EXAVITQu4vr4xnSDxMaL' }
     ];
 
-    return list.map(item => ({
-      id: item.id,
-      name: `ElevenLabs ${item.name}`,
-      provider: 'elevenlabs',
-      language: item.lang,
-      gender: item.gender,
-      naturalness: 'generative',
-      capabilities: {
-        speedSupport: true,
-        pitchSupport: false,
-        emotionSupport: true,
-        styleSupport: true,
-        streamingSupport: true
-      },
-      supportsPreview: true,
-      supportsStreaming: true,
-      tone: item.tone,
-      style: item.externalId,
-      isAvailable: false,
-      available: false
-    }));
+    return list.map(item => {
+      const words = item.tone.toLowerCase().split(/[\s,&]+/).filter(w => w.length > 3);
+      const chars = Array.from(new Set(['generative', ...words])).slice(0, 5);
+
+      return {
+        id: item.id,
+        voiceId: item.id,
+        providerVoiceId: item.externalId,
+        name: `ElevenLabs ${item.name}`,
+        provider: 'elevenlabs',
+        language: item.lang,
+        gender: item.gender,
+        naturalness: 'generative',
+        capabilities: {
+          speedSupport: true,
+          pitchSupport: false,
+          emotionSupport: true,
+          styleSupport: true,
+          streamingSupport: true
+        },
+        supportedControls: ['speed', 'stability', 'similarity', 'style'],
+        characteristics: chars,
+        supportsPreview: true,
+        supportsStreaming: true,
+        tone: item.tone,
+        style: item.externalId,
+        isAvailable: false,
+        available: false,
+        requiresApiKey: true,
+        requiresCredential: true
+      };
+    });
   }
 }

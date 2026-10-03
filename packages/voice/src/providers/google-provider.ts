@@ -163,26 +163,37 @@ export class GoogleCloudTTSProvider implements TTSProvider {
       { id: 'goog-ja-neural2-c', name: 'ja-JP-Neural2-C', language: 'ja-JP', gender: 'male', naturalness: 'neural', tone: 'Japanese Tokyo natural male', style: 'Neural2' }
     ];
 
-    return raw.map(item => ({
-      id: item.id,
-      name: item.name,
-      provider: 'google-cloud',
-      language: item.language,
-      gender: item.gender,
-      naturalness: item.naturalness,
-      capabilities: {
-        speedSupport: true,
-        pitchSupport: true,
-        emotionSupport: item.naturalness === 'generative' || item.naturalness === 'studio',
-        styleSupport: true,
-        streamingSupport: true
-      },
-      supportsPreview: true,
-      supportsStreaming: true,
-      tone: item.tone,
-      style: item.style,
-      isAvailable: false,
-      available: false
-    }));
+    return raw.map(item => {
+      const words = item.tone.toLowerCase().split(/[\s,&-]+/).filter(w => w.length > 3);
+      const chars = Array.from(new Set([item.naturalness, ...words])).slice(0, 5);
+
+      return {
+        id: item.id,
+        voiceId: item.id,
+        providerVoiceId: item.name,
+        name: item.name,
+        provider: 'google-cloud',
+        language: item.language,
+        gender: item.gender,
+        naturalness: item.naturalness,
+        capabilities: {
+          speedSupport: true,
+          pitchSupport: true,
+          emotionSupport: item.naturalness === 'generative' || item.naturalness === 'studio',
+          styleSupport: false,
+          streamingSupport: true
+        },
+        supportedControls: ['speed', 'pitch'],
+        characteristics: chars,
+        supportsPreview: true,
+        supportsStreaming: true,
+        tone: item.tone,
+        style: item.style,
+        isAvailable: false,
+        available: false,
+        requiresApiKey: true,
+        requiresCredential: true
+      };
+    });
   }
 }

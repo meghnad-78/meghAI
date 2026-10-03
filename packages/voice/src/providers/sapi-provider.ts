@@ -74,6 +74,8 @@ $synth.Dispose();
 
           return {
             id: shortId,
+            voiceId: shortId,
+            providerVoiceId: rawName,
             name: rawName,
             provider: 'local',
             language: culture,
@@ -84,11 +86,13 @@ $synth.Dispose();
             naturalness: 'standard',
             capabilities: {
               speedSupport: true,
-              pitchSupport: true,
+              pitchSupport: false,
               emotionSupport: false,
               styleSupport: false,
               streamingSupport: false
             },
+            supportedControls: ['speed'],
+            characteristics: ['classic', 'desktop', 'clear'],
             supportsPreview: true,
             supportsStreaming: false,
             tone: 'Clear desktop speech',
@@ -220,6 +224,8 @@ $synth.Dispose();
     return [
       {
         id: 'local-david',
+        voiceId: 'local-david',
+        providerVoiceId: 'Microsoft David Desktop',
         name: 'Microsoft David Desktop',
         provider: 'local',
         language: 'en-US',
@@ -230,11 +236,13 @@ $synth.Dispose();
         naturalness: 'standard',
         capabilities: {
           speedSupport: true,
-          pitchSupport: true,
+          pitchSupport: false,
           emotionSupport: false,
           styleSupport: false,
           streamingSupport: false
         },
+        supportedControls: ['speed'],
+        characteristics: ['classic', 'authoritative', 'american', 'desktop'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Crisp American male',
@@ -242,6 +250,8 @@ $synth.Dispose();
       },
       {
         id: 'local-hazel',
+        voiceId: 'local-hazel',
+        providerVoiceId: 'Microsoft Hazel Desktop',
         name: 'Microsoft Hazel Desktop',
         provider: 'local',
         language: 'en-GB',
@@ -252,11 +262,13 @@ $synth.Dispose();
         naturalness: 'standard',
         capabilities: {
           speedSupport: true,
-          pitchSupport: true,
+          pitchSupport: false,
           emotionSupport: false,
           styleSupport: false,
           streamingSupport: false
         },
+        supportedControls: ['speed'],
+        characteristics: ['classic', 'articulate', 'british', 'desktop'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Articulate British female',
@@ -264,6 +276,8 @@ $synth.Dispose();
       },
       {
         id: 'local-zira',
+        voiceId: 'local-zira',
+        providerVoiceId: 'Microsoft Zira Desktop',
         name: 'Microsoft Zira Desktop',
         provider: 'local',
         language: 'en-US',
@@ -274,11 +288,13 @@ $synth.Dispose();
         naturalness: 'standard',
         capabilities: {
           speedSupport: true,
-          pitchSupport: true,
+          pitchSupport: false,
           emotionSupport: false,
           styleSupport: false,
           streamingSupport: false
         },
+        supportedControls: ['speed'],
+        characteristics: ['classic', 'clear', 'american', 'desktop'],
         supportsPreview: true,
         supportsStreaming: false,
         tone: 'Natural American female',

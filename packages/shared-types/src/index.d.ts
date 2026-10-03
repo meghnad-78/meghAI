@@ -124,6 +124,11 @@ export interface ModelResponse {
     finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error';
     fallbackOccurred?: boolean;
     fallbackReason?: string;
+    requestedProvider?: string;
+    requestedModel?: string;
+    actualProvider?: ModelProviderId;
+    actualModel?: string;
+    requestId?: string;
 }
 export interface ModelStreamChunk {
     delta: string;
@@ -223,7 +228,7 @@ export interface WorkspaceEntry {
     createdAt: string;
     updatedAt: string;
 }
-export type EventType = 'USER_INPUT_RECEIVED' | 'WAKE_DETECTED' | 'MIC_STARTING' | 'MIC_READY' | 'MIC_LISTENING' | 'MIC_LEVEL' | 'MIC_STOPPING' | 'MIC_OFF' | 'MIC_ERROR' | 'MIC_DEVICE_UNAVAILABLE' | 'VAD_SPEECH_STARTED' | 'VAD_SPEECH_ENDED' | 'VOICE_INPUT_STATE_CHANGED' | 'VOICE_COMMAND_RECEIVED' | 'VOICE_TRANSCRIBING' | 'TRANSCRIPT_PARTIAL' | 'TRANSCRIPT_FINAL' | 'STT_STARTED' | 'STT_COMPLETED' | 'TTS_REQUESTED' | 'TTS_STARTED' | 'TTS_AUDIO_READY' | 'AUDIO_PLAYBACK_STARTED' | 'SPEAKING' | 'AUDIO_PLAYBACK_COMPLETED' | 'TTS_COMPLETED' | 'TTS_FAILED' | 'AUDIO_PLAYBACK_FAILED' | 'TTS_INTERRUPTED' | 'AUDIO_CUE_STARTED' | 'AUDIO_CUE_COMPLETED' | 'AUDIO_STATE_CHANGED' | 'VOICE_ERROR' | 'INTERRUPTED' | 'LANGUAGE_DETECTED' | 'INTENT_CLASSIFIED' | 'CONTEXT_RETRIEVED' | 'MEMORY_RETRIEVED' | 'PLAN_CREATED' | 'MODEL_SELECTED' | 'MODEL_STARTED' | 'MODEL_CHUNK' | 'MODEL_FALLBACK' | 'MODEL_COMPLETED' | 'TOOL_REQUESTED' | 'TOOL_APPROVAL_REQUIRED' | 'TOOL_STARTED' | 'TOOL_COMPLETED' | 'VERIFICATION_STARTED' | 'VERIFICATION_COMPLETED' | 'TASK_COMPLETED' | 'TASK_FAILED' | 'TASK_CANCELLED' | 'KILL_SWITCH_ACTIVATED' | 'MEMORY_COMMAND_DETECTED' | 'MEMORY_CANDIDATE_CREATED' | 'MEMORY_PROMOTED' | 'MEMORY_STORED' | 'MEMORY_DELETED' | 'ROUTINE_TRIGGERED' | 'AI_STATE_CHANGED';
+export type EventType = 'USER_INPUT_RECEIVED' | 'WAKE_DETECTED' | 'MIC_STARTING' | 'MIC_READY' | 'MIC_LISTENING' | 'MIC_LEVEL' | 'MIC_STOPPING' | 'MIC_OFF' | 'MIC_ERROR' | 'MIC_DEVICE_UNAVAILABLE' | 'VAD_SPEECH_STARTED' | 'VAD_SPEECH_ENDED' | 'VOICE_INPUT_STATE_CHANGED' | 'VOICE_COMMAND_RECEIVED' | 'VOICE_TRANSCRIBING' | 'TRANSCRIPT_PARTIAL' | 'TRANSCRIPT_FINAL' | 'VOICE_MODEL_RATE_LIMITED' | 'STT_STARTED' | 'STT_COMPLETED' | 'TTS_REQUESTED' | 'TTS_STARTED' | 'TTS_AUDIO_READY' | 'AUDIO_PLAYBACK_STARTED' | 'SPEAKING' | 'AUDIO_PLAYBACK_COMPLETED' | 'TTS_COMPLETED' | 'TTS_FAILED' | 'AUDIO_PLAYBACK_FAILED' | 'TTS_INTERRUPTED' | 'AUDIO_CUE_STARTED' | 'AUDIO_CUE_COMPLETED' | 'AUDIO_STATE_CHANGED' | 'VOICE_ERROR' | 'VOICE_RECOGNITION_GATED' | 'VOICE_RECOGNITION_RESUMED' | 'INTERRUPTED' | 'LANGUAGE_DETECTED' | 'INTENT_CLASSIFIED' | 'CONTEXT_RETRIEVED' | 'MEMORY_RETRIEVED' | 'PLAN_CREATED' | 'MODEL_SELECTED' | 'MODEL_STARTED' | 'MODEL_CHUNK' | 'MODEL_FALLBACK' | 'MODEL_COMPLETED' | 'TOOL_REQUESTED' | 'TOOL_APPROVAL_REQUIRED' | 'TOOL_STARTED' | 'TOOL_COMPLETED' | 'VERIFICATION_STARTED' | 'VERIFICATION_COMPLETED' | 'TASK_COMPLETED' | 'TASK_FAILED' | 'TASK_CANCELLED' | 'KILL_SWITCH_ACTIVATED' | 'MEMORY_COMMAND_DETECTED' | 'MEMORY_CANDIDATE_CREATED' | 'MEMORY_PROMOTED' | 'MEMORY_STORED' | 'MEMORY_DELETED' | 'ROUTINE_TRIGGERED' | 'MODEL_SETTINGS_CHANGED' | 'PERSONALITY_SETTINGS_CHANGED' | 'WAKE_ACTIVATION_STARTED' | 'AI_STATE_CHANGED';
 export interface MeghAIEvent<T = unknown> {
     id: string;
     type: EventType;
@@ -243,6 +248,7 @@ export interface VoiceCapability {
 }
 export interface VoiceProfile {
     id: string;
+    voiceId?: string;
     name: string;
     displayName?: string;
     provider: VoiceProviderId;
@@ -259,7 +265,10 @@ export interface VoiceProfile {
     sampleAudioUrl?: string;
     supportsPreview?: boolean;
     supportsStreaming?: boolean;
+    supportedControls?: Array<'speed' | 'pitch' | 'stability' | 'similarity' | 'style' | 'emotion' | 'expressiveness' | string>;
+    characteristics?: string[];
     requiresApiKey?: boolean;
+    requiresCredential?: boolean;
     isAvailable: boolean;
     available?: boolean;
     availabilityReason?: string;
@@ -271,7 +280,10 @@ export interface VoiceSettings {
     speechRate: number;
     pitch: number;
     volume: number;
-    personalityMode: PersonalityMode;
+    stability?: number;
+    similarity?: number;
+    style?: number;
+    personalityMode?: PersonalityMode;
     autoSpeak: AutoSpeakMode;
 }
 export interface TTSOptions {
@@ -279,7 +291,11 @@ export interface TTSOptions {
     speechRate?: number;
     pitch?: number;
     volume?: number;
+    stability?: number;
+    similarity?: number;
+    style?: number;
     outputFormat?: 'wav' | 'mp3';
+    allowFallback?: boolean;
 }
 export interface TTSSynthesisResult {
     audioFilePath?: string;
@@ -335,6 +351,8 @@ export interface AudioCaptureDiagnostics {
     activeDevice: string;
     isLive: boolean;
     state: MicrophoneState;
+    aecAvailable?: boolean;
+    aecMode?: 'HARDWARE_DSP' | 'VOICE_SESSION_GATING_FALLBACK' | 'DISABLED';
 }
 export type VADState = 'SILENCE' | 'SPEECH';
 export interface VADFrameResult {
@@ -345,7 +363,30 @@ export interface VADFrameResult {
     rms: number;
     threshold: number;
 }
-export type VoiceInputState = 'IDLE' | 'PASSIVE_WAKE_LISTENING' | 'WAKE_CONFIRMED' | 'COMMAND_CAPTURE' | 'TRANSCRIBING' | 'PROCESSING' | 'SPEAKING' | 'ERROR';
+export type VoiceInputState = 'IDLE' | 'PASSIVE_WAKE_LISTENING' | 'WAKE_CONFIRMED' | 'WAKE_DETECTED' | 'ACTIVATION' | 'COMMAND_CAPTURE' | 'COMMAND_LISTENING' | 'TRANSCRIBING' | 'PROCESSING' | 'SPEAKING' | 'INTERRUPTED' | 'ERROR';
+export type PersonalityId = 'professional' | 'warm' | 'futuristic' | 'calm' | 'coding_partner' | 'research_analyst' | 'study_coach' | 'executive_assistant' | 'creative_partner' | 'motivator' | 'minimalist' | 'technical_expert';
+export interface PersonalityProfile {
+    id: PersonalityId | string;
+    name: string;
+    description: string;
+    tone: string;
+    verbosity: 'concise' | 'balanced' | 'comprehensive';
+    humorLevel: 'none' | 'low' | 'moderate' | 'playful';
+    formality: 'formal' | 'adaptive' | 'casual';
+    initiativeLevel: 'task_only' | 'balanced' | 'proactive';
+    empathyStyle: 'objective' | 'supportive' | 'calm' | 'expressive';
+    technicalDepth: 'high' | 'balanced' | 'simplified';
+    proactivity: 'low' | 'medium' | 'high';
+    visualStyle: 'precise' | 'soft' | 'orbital' | 'breathing' | 'minimal' | string;
+    preferredVoiceTags: string[];
+    suggestedVoiceCharacteristics?: string[];
+    suggestedVoiceIds?: string[];
+    systemInstruction: string;
+}
+export interface PersonalitySettings {
+    selectedPersonalityId: string;
+    customInstructions?: string;
+}
 export type OnlineSystemStatus = 'ONLINE' | 'ONLINE_DEGRADED' | 'CONNECTING' | 'DEGRADED' | 'PROVIDER_ERROR' | 'NO_CREDENTIALS' | 'RATE_LIMITED' | 'NETWORK_UNAVAILABLE';
 export type STTQualityMode = 'REALTIME' | 'BALANCED' | 'HIGH_ACCURACY';
 export interface STTWordTiming {

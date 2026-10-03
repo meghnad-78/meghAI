@@ -31,6 +31,7 @@ export const VoiceStudio: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [languageFilter, setLanguageFilter] = useState('');
   const [providerFilter, setProviderFilter] = useState('');
+  const [characteristicFilter, setCharacteristicFilter] = useState('');
   const [naturalnessFilter, setNaturalnessFilter] = useState('');
   const [availableOnly, setAvailableOnly] = useState(false);
 
@@ -242,8 +243,18 @@ export const VoiceStudio: React.FC = () => {
   const filteredVoices = voices.filter(v => {
     if (availableOnly && !v.available && !v.isAvailable) return false;
     if (languageFilter && !v.language.toLowerCase().includes(languageFilter.toLowerCase())) return false;
-    if (providerFilter && v.provider !== providerFilter) return false;
+    if (providerFilter) {
+      const pf = providerFilter.toLowerCase();
+      if (pf === 'windows-sapi' || pf === 'local') {
+        if (v.provider !== 'windows-sapi' && (v.provider as any) !== 'local') return false;
+      } else if (pf === 'google-cloud-tts' || pf === 'google-cloud' || pf === 'google') {
+        if (v.provider !== 'google-cloud' && (v.provider as any) !== 'google-cloud-tts' && (v.provider as any) !== 'google') return false;
+      } else if (v.provider !== pf) {
+        return false;
+      }
+    }
     if (naturalnessFilter && v.naturalness !== naturalnessFilter) return false;
+    if (characteristicFilter && !(v.characteristics || []).some(c => c.toLowerCase() === characteristicFilter.toLowerCase())) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const matchName = v.name.toLowerCase().includes(q);
@@ -253,7 +264,8 @@ export const VoiceStudio: React.FC = () => {
       const matchStyle = (v.style || '').toLowerCase().includes(q);
       const matchAccent = (v.accent || '').toLowerCase().includes(q);
       const matchProvider = (v.provider || '').toLowerCase().includes(q);
-      if (!matchName && !matchLang && !matchDesc && !matchTone && !matchStyle && !matchAccent && !matchProvider) {
+      const matchChar = (v.characteristics || []).some(c => c.toLowerCase().includes(q));
+      if (!matchName && !matchLang && !matchDesc && !matchTone && !matchStyle && !matchAccent && !matchProvider && !matchChar) {
         return false;
       }
     }
@@ -292,11 +304,16 @@ export const VoiceStudio: React.FC = () => {
       case 'windows-onecore':
         return { label: 'Windows OneCore', bg: 'rgba(0, 240, 255, 0.15)', border: '#00f0ff', color: '#38bdf8' };
       case 'windows-sapi':
+      case 'local':
         return { label: 'Windows SAPI', bg: 'rgba(148, 163, 184, 0.15)', border: '#94a3b8', color: '#cbd5e1' };
+      case 'google-cloud':
       case 'google-cloud-tts':
+      case 'google':
         return { label: 'Google Cloud', bg: 'rgba(168, 85, 247, 0.15)', border: '#a855f7', color: '#d8b4fe' };
       case 'elevenlabs':
         return { label: 'ElevenLabs', bg: 'rgba(16, 185, 129, 0.15)', border: '#10b981', color: '#6ee7b7' };
+      case 'openai':
+        return { label: 'OpenAI Speech', bg: 'rgba(234, 179, 8, 0.15)', border: '#eab308', color: '#fde047' };
       default:
         return { label: provider, bg: 'rgba(255, 255, 255, 0.05)', border: 'rgba(255, 255, 255, 0.1)', color: '#94a3b8' };
     }
@@ -360,7 +377,7 @@ export const VoiceStudio: React.FC = () => {
           <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
             <div style={{ fontSize: '11px', color: '#94a3b8' }}>Total Catalog Voices</div>
             <div style={{ fontSize: '18px', fontWeight: 700, color: '#f8fafc', marginTop: '2px' }}>
-              {catalogStats.totalVoices}
+              {catalogStats.totalVoices} Across 5 Providers
             </div>
           </div>
           <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(0, 240, 255, 0.2)' }}>
@@ -370,7 +387,7 @@ export const VoiceStudio: React.FC = () => {
             </div>
           </div>
           <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(168, 85, 247, 0.2)' }}>
-            <div style={{ fontSize: '11px', color: '#c084fc' }}>Cloud AI (Google + ElevenLabs)</div>
+            <div style={{ fontSize: '11px', color: '#c084fc' }}>Cloud AI (Google + ElevenLabs + OpenAI)</div>
             <div style={{ fontSize: '18px', fontWeight: 700, color: '#d8b4fe', marginTop: '2px' }}>
               {catalogStats.totalCloud} Voices
             </div>
@@ -383,6 +400,84 @@ export const VoiceStudio: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Active Voice Spotlight Banner */}
+      {(() => {
+        const activeProfile = voices.find(v => v.id === settings.selectedVoiceId) || voices[0];
+        if (!activeProfile) return null;
+        const badge = getProviderBadge(activeProfile.provider);
+        const isSpeakingThis = isPlaying && activeVoicePlaying === activeProfile.id;
+
+        return (
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(0, 240, 255, 0.08) 0%, rgba(138, 43, 226, 0.08) 100%)',
+            border: `1px solid ${isSpeakingThis ? '#c084fc' : 'rgba(0, 240, 255, 0.3)'}`,
+            borderRadius: '12px',
+            padding: '16px 20px',
+            marginBottom: '20px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxShadow: '0 4px 20px rgba(0, 240, 255, 0.05)'
+          }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#00f0ff', letterSpacing: '0.05em' }}>
+                  ACTIVE SYSTEM VOICE
+                </span>
+                <span style={{
+                  fontSize: '10px',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  background: badge.bg,
+                  border: `1px solid ${badge.border}`,
+                  color: badge.color,
+                  fontWeight: 700
+                }}>
+                  {badge.label}
+                </span>
+                <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.06)', color: '#cbd5e1' }}>
+                  {activeProfile.language} • {activeProfile.gender}
+                </span>
+                {isSpeakingThis && (
+                  <span style={{ fontSize: '10px', color: '#c084fc', fontWeight: 700 }}>
+                    ● LIVE PLAYING THROUGH AUDIO DEVICE
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: '18px', fontWeight: 700, color: '#f8fafc' }}>
+                {activeProfile.name}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+                {(activeProfile.characteristics || ['natural', 'articulate']).map(c => (
+                  <span key={c} style={{ fontSize: '10px', padding: '2px 7px', borderRadius: '12px', background: 'rgba(0, 240, 255, 0.12)', border: '1px solid rgba(0, 240, 255, 0.25)', color: '#38bdf8' }}>
+                    #{c}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                onClick={() => handlePreview(activeProfile.id)}
+                disabled={!activeProfile.available && !activeProfile.isAvailable && activeVoicePlaying !== activeProfile.id}
+                style={{
+                  background: isSpeakingThis ? 'rgba(239, 68, 68, 0.25)' : '#00f0ff',
+                  border: isSpeakingThis ? '1px solid #ef4444' : 'none',
+                  color: isSpeakingThis ? '#ef4444' : '#07090e',
+                  borderRadius: '8px',
+                  padding: '8px 16px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {isSpeakingThis ? '■ Stop Audio' : '▶ Test Voice Audio'}
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Auto-Speak Behavior Selector */}
       <div style={{
@@ -512,62 +607,119 @@ export const VoiceStudio: React.FC = () => {
       </div>
 
       {/* Speech Parameters Controls */}
-      <div style={{
-        background: 'rgba(15, 23, 42, 0.65)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: '12px',
-        padding: '16px',
-        marginBottom: '20px',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(3, 1fr)',
-        gap: '20px'
-      }}>
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
-            <span>Speech Speed</span>
-            <span>{settings.speechRate.toFixed(2)}x</span>
+      {(() => {
+        const activeProfile = voices.find(v => v.id === settings.selectedVoiceId) || voices[0];
+        const supportsPitch = activeProfile
+          ? (activeProfile.supportedControls?.includes('pitch') ?? (activeProfile.provider === 'windows-onecore' || activeProfile.provider === 'google-cloud'))
+          : true;
+        const isElevenLabs = activeProfile?.provider === 'elevenlabs';
+
+        return (
+          <div style={{
+            background: 'rgba(15, 23, 42, 0.65)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '12px',
+            padding: '16px',
+            marginBottom: '20px'
+          }}>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Voice Synthesis Parameters (Controls adapt dynamically per provider)</span>
+              {activeProfile && (
+                <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                  Target Provider: <strong style={{ color: '#00f0ff' }}>{getProviderBadge(activeProfile.provider).label}</strong>
+                </span>
+              )}
+            </div>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '16px'
+            }}>
+              {/* Speed - Supported on all */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
+                  <span>Speech Speed</span>
+                  <span style={{ fontWeight: 600, color: '#00f0ff' }}>{settings.speechRate.toFixed(2)}x</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="2.0"
+                  step="0.05"
+                  value={settings.speechRate}
+                  onChange={e => handleUpdateSettings({ speechRate: parseFloat(e.target.value) })}
+                  style={{ width: '100%', accentColor: '#00f0ff' }}
+                />
+              </div>
+
+              {/* Pitch - Provider specific */}
+              <div style={{ opacity: supportsPitch ? 1 : 0.45 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
+                  <span>Pitch</span>
+                  {supportsPitch ? (
+                    <span style={{ fontWeight: 600, color: '#8a2be2' }}>{settings.pitch.toFixed(2)}</span>
+                  ) : (
+                    <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', fontWeight: 700 }}>
+                      NOT SUPPORTED
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="1.5"
+                  step="0.05"
+                  disabled={!supportsPitch}
+                  value={settings.pitch}
+                  onChange={e => handleUpdateSettings({ pitch: parseFloat(e.target.value) })}
+                  style={{ width: '100%', accentColor: '#8a2be2', cursor: supportsPitch ? 'pointer' : 'not-allowed' }}
+                />
+              </div>
+
+              {/* Output Volume */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
+                  <span>Output Volume</span>
+                  <span style={{ fontWeight: 600, color: '#10b981' }}>{Math.round(settings.volume * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.0"
+                  max="1.0"
+                  step="0.05"
+                  value={settings.volume}
+                  onChange={e => handleUpdateSettings({ volume: parseFloat(e.target.value) })}
+                  style={{ width: '100%', accentColor: '#10b981' }}
+                />
+              </div>
+
+              {/* ElevenLabs Stability */}
+              <div style={{ opacity: isElevenLabs ? 1 : 0.45 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
+                  <span>Stability (ElevenLabs)</span>
+                  {isElevenLabs ? (
+                    <span style={{ fontWeight: 600, color: '#10b981' }}>{((settings as any).stability ?? 0.5).toFixed(2)}</span>
+                  ) : (
+                    <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.08)', color: '#94a3b8' }}>
+                      ELEVENLABS ONLY
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="range"
+                  min="0.0"
+                  max="1.0"
+                  step="0.05"
+                  disabled={!isElevenLabs}
+                  value={(settings as any).stability ?? 0.5}
+                  onChange={e => handleUpdateSettings({ stability: parseFloat(e.target.value) } as any)}
+                  style={{ width: '100%', accentColor: '#10b981', cursor: isElevenLabs ? 'pointer' : 'not-allowed' }}
+                />
+              </div>
+            </div>
           </div>
-          <input
-            type="range"
-            min="0.5"
-            max="2.0"
-            step="0.05"
-            value={settings.speechRate}
-            onChange={e => handleUpdateSettings({ speechRate: parseFloat(e.target.value) })}
-            style={{ width: '100%', accentColor: '#00f0ff' }}
-          />
-        </div>
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
-            <span>Pitch</span>
-            <span>{settings.pitch.toFixed(2)}</span>
-          </div>
-          <input
-            type="range"
-            min="0.5"
-            max="1.5"
-            step="0.05"
-            value={settings.pitch}
-            onChange={e => handleUpdateSettings({ pitch: parseFloat(e.target.value) })}
-            style={{ width: '100%', accentColor: '#8a2be2' }}
-          />
-        </div>
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
-            <span>Output Volume</span>
-            <span>{Math.round(settings.volume * 100)}%</span>
-          </div>
-          <input
-            type="range"
-            min="0.0"
-            max="1.0"
-            step="0.05"
-            value={settings.volume}
-            onChange={e => handleUpdateSettings({ volume: parseFloat(e.target.value) })}
-            style={{ width: '100%', accentColor: '#10b981' }}
-          />
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Voice Directory & Search */}
       <div style={{
@@ -590,6 +742,32 @@ export const VoiceStudio: React.FC = () => {
             />
             Show Available Only
           </label>
+        </div>
+
+        {/* Characteristics Pills */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', marginBottom: '12px' }}>
+          <span style={{ fontSize: '11px', color: '#94a3b8', marginRight: '4px' }}>Characteristics:</span>
+          {['all', 'warm', 'calm', 'deep', 'articulate', 'expressive', 'energetic', 'narrator', 'natural', 'clear', 'confident'].map(char => {
+            const isCharActive = char === 'all' ? !characteristicFilter : characteristicFilter === char;
+            return (
+              <button
+                key={char}
+                onClick={() => setCharacteristicFilter(char === 'all' ? '' : char === characteristicFilter ? '' : char)}
+                style={{
+                  background: isCharActive ? 'rgba(0, 240, 255, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+                  border: `1px solid ${isCharActive ? '#00f0ff' : 'rgba(255, 255, 255, 0.08)'}`,
+                  borderRadius: '12px',
+                  padding: '2px 8px',
+                  color: isCharActive ? '#00f0ff' : '#cbd5e1',
+                  fontSize: '11px',
+                  cursor: 'pointer',
+                  textTransform: 'capitalize'
+                }}
+              >
+                {char}
+              </button>
+            );
+          })}
         </div>
 
         {/* Filter Bar */}
@@ -618,6 +796,7 @@ export const VoiceStudio: React.FC = () => {
             <option value="windows-sapi">Windows SAPI (3 Desktop)</option>
             <option value="google-cloud-tts">Google Cloud (44 Voices)</option>
             <option value="elevenlabs">ElevenLabs (46 Voices)</option>
+            <option value="openai">OpenAI Speech (6 Voices)</option>
           </select>
           <select
             value={languageFilter}
@@ -752,6 +931,20 @@ export const VoiceStudio: React.FC = () => {
                     {v.description}
                   </div>
                 )}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+                  {(v.characteristics || []).slice(0, 4).map(c => (
+                    <span key={c} style={{
+                      fontSize: '9px',
+                      padding: '1px 5px',
+                      borderRadius: '8px',
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      color: '#94a3b8'
+                    }}>
+                      #{c}
+                    </span>
+                  ))}
+                </div>
               </div>
 
               {/* Status & Action Buttons */}
