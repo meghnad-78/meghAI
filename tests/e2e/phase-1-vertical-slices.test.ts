@@ -37,6 +37,45 @@ describe('MeghAI Phase 1 Vertical Slices (End-to-End)', () => {
     toolRuntime = new ToolRuntime(toolRegistry, permissionBroker);
     orchestrator = new MultiAgentOrchestrator();
     modelRouter = new ModelRouter();
+    modelRouter.registerProvider({
+      id: 'local-ollama',
+      name: 'Local Test Mock',
+      isConfigured: () => true,
+      getModels: () => [{
+        id: 'llama3.2:latest',
+        providerId: 'local-ollama',
+        name: 'Llama 3.2 (Test Mock)',
+        isLocal: true,
+        costPer1kInputTokensUSD: 0,
+        costPer1kOutputTokensUSD: 0,
+        capabilities: {
+          supportsText: true,
+          supportsVision: false,
+          supportsAudio: false,
+          supportsFiles: true,
+          supportsLongContext: false,
+          supportsToolCalling: true,
+          supportsStructuredOutput: true,
+          supportsStreaming: true,
+          supportsReasoning: true,
+          supportsWebSearch: false,
+          supportsEmbeddings: true,
+          maxContextTokens: 131072
+        }
+      }],
+      checkHealth: async () => ({ available: true, latencyMs: 5, isConfigured: true }),
+      complete: async req => {
+        await new Promise(r => setTimeout(r, 2));
+        return {
+          content: `Synthetic resolution for: ${req.messages[req.messages.length - 1]?.content || ''}`,
+          providerId: 'local-ollama',
+          modelId: 'llama3.2:latest',
+          tokensUsed: { promptTokens: 10, completionTokens: 25, totalTokens: 35 },
+          latencyMs: 5,
+          finishReason: 'stop'
+        };
+      }
+    });
     memoryManager = new MemoryManager(db);
     contextEngine = new ContextEngine(memoryManager, permissionBroker);
     ragPipeline = new RAGPipeline();

@@ -1,21 +1,73 @@
 import React from 'react';
-import type { AIState } from '@meghai/shared-types';
+import type { AIState, MicrophoneState, VoiceInputState } from '@meghai/shared-types';
 
 interface TopHUDProps {
   aiState: AIState;
-  micStatus: 'READY' | 'LISTENING' | 'OFF';
+  micState: MicrophoneState;
+  voiceInputState?: VoiceInputState;
+  micLevel?: number;
   isLocalMode: boolean;
+  autoSpeak?: 'OFF' | 'ON' | 'ASK';
+  onToggleAutoSpeak?: () => void;
   onEmergencyStop: () => void;
   onToggleMic: () => void;
 }
 
 export const TopHUD: React.FC<TopHUDProps> = ({
   aiState,
-  micStatus,
+  micState,
+  voiceInputState = 'IDLE',
+  micLevel = 0,
   isLocalMode,
+  autoSpeak = 'ON',
+  onToggleAutoSpeak,
   onEmergencyStop,
   onToggleMic
 }) => {
+  const getMicColor = () => {
+    if (micState === 'MIC_LISTENING') {
+      switch (voiceInputState) {
+        case 'WAKE_CONFIRMED': return '#00f0ff';
+        case 'COMMAND_CAPTURE': return '#ef4444';
+        case 'TRANSCRIBING': return '#f59e0b';
+        case 'PROCESSING': return '#a855f7';
+        case 'PASSIVE_WAKE_LISTENING':
+        default: return '#10b981';
+      }
+    }
+    switch (micState) {
+      case 'MIC_STARTING': return '#f59e0b';
+      case 'MIC_STOPPING': return '#d97706';
+      case 'MIC_READY': return '#10b981';
+      case 'MIC_DEVICE_UNAVAILABLE': return '#eab308';
+      case 'MIC_ERROR': return '#dc2626';
+      case 'MIC_OFF':
+      default: return '#64748b';
+    }
+  };
+
+  const getMicLabel = () => {
+    if (micState === 'MIC_LISTENING') {
+      switch (voiceInputState) {
+        case 'PASSIVE_WAKE_LISTENING': return 'WAKE READY: "Hey Megh"';
+        case 'WAKE_CONFIRMED': return 'WAKE DETECTED!';
+        case 'COMMAND_CAPTURE': return 'LISTENING...';
+        case 'TRANSCRIBING': return 'TRANSCRIBING...';
+        case 'PROCESSING': return 'PROCESSING...';
+        case 'SPEAKING': return 'SPEAKING...';
+        default: return 'LISTENING';
+      }
+    }
+    switch (micState) {
+      case 'MIC_STARTING': return 'STARTING...';
+      case 'MIC_STOPPING': return 'STOPPING...';
+      case 'MIC_READY': return 'MIC READY';
+      case 'MIC_DEVICE_UNAVAILABLE': return 'NO MIC';
+      case 'MIC_ERROR': return 'MIC ERROR';
+      case 'MIC_OFF':
+      default: return 'MIC OFF';
+    }
+  };
   return (
     <header style={{
       display: 'flex',
@@ -57,51 +109,152 @@ export const TopHUD: React.FC<TopHUDProps> = ({
       </div>
 
       {/* Central Telemetry Status */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
         {/* AI State Indicator */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '6px',
-          background: 'rgba(15, 23, 42, 0.6)',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          padding: '6px 12px',
+          gap: '8px',
+          background: aiState === 'SPEAKING'
+            ? 'rgba(168, 85, 247, 0.15)'
+            : aiState === 'RESPONDING' || aiState === 'PLANNING'
+            ? 'rgba(0, 240, 255, 0.12)'
+            : 'rgba(15, 23, 42, 0.6)',
+          border: `1px solid ${
+            aiState === 'SPEAKING'
+              ? 'rgba(168, 85, 247, 0.4)'
+              : aiState === 'RESPONDING' || aiState === 'PLANNING'
+              ? 'rgba(0, 240, 255, 0.3)'
+              : 'rgba(255, 255, 255, 0.1)'
+          }`,
+          padding: '6px 14px',
           borderRadius: '20px',
           fontSize: '12px',
-          color: '#cbd5e1'
+          color: aiState === 'SPEAKING' ? '#d8b4fe' : '#cbd5e1',
+          transition: 'all 0.2s ease'
         }}>
           <span style={{
             width: '8px',
             height: '8px',
             borderRadius: '50%',
-            backgroundColor: aiState === 'FAILED' || aiState === 'CANCELLED' ? '#ef4444' : aiState === 'VERIFYING' ? '#10b981' : '#38bdf8'
+            backgroundColor: aiState === 'FAILED' || aiState === 'CANCELLED'
+              ? '#ef4444'
+              : aiState === 'SPEAKING'
+              ? '#a855f7'
+              : aiState === 'RESPONDING' || aiState === 'PLANNING'
+              ? '#00f0ff'
+              : aiState === 'VERIFYING'
+              ? '#10b981'
+              : '#38bdf8',
+            boxShadow: aiState === 'SPEAKING'
+              ? '0 0 12px #a855f7'
+              : (aiState === 'RESPONDING' || aiState === 'PLANNING')
+              ? '0 0 10px #00f0ff'
+              : 'none'
           }} />
-          <span>STATE: {aiState}</span>
+          <span style={{ fontWeight: 600 }}>STATE: {aiState}</span>
+
+          {/* Animated sound waves when MeghAI is speaking through Windows speakers */}
+          {aiState === 'SPEAKING' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '2px', height: '14px', paddingLeft: '2px' }}>
+              {[6, 12, 16, 10, 14, 8].map((h, i) => (
+                <span
+                  key={i}
+                  style={{
+                    width: '2px',
+                    height: `${h}px`,
+                    backgroundColor: '#a855f7',
+                    borderRadius: '1px'
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Animated thinking dot pulse when MeghAI is thinking */}
+          {(aiState === 'RESPONDING' || aiState === 'PLANNING') && (
+            <span style={{ color: '#00f0ff', fontSize: '10px', fontWeight: 700, letterSpacing: '1px' }}>
+              THINKING...
+            </span>
+          )}
         </div>
-        {/* Mic Indicator */}
+
+        {/* Auto-Speak Toggle Badge */}
+        <button
+          onClick={onToggleAutoSpeak}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: autoSpeak === 'ON' ? 'rgba(0, 240, 255, 0.15)' : 'rgba(15, 23, 42, 0.6)',
+            border: `1px solid ${autoSpeak === 'ON' ? 'rgba(0, 240, 255, 0.4)' : 'rgba(255, 255, 255, 0.1)'}`,
+            padding: '6px 12px',
+            borderRadius: '20px',
+            fontSize: '12px',
+            fontWeight: 600,
+            color: autoSpeak === 'ON' ? '#00f0ff' : '#94a3b8',
+            cursor: onToggleAutoSpeak ? 'pointer' : 'default',
+            transition: 'all 0.15s ease'
+          }}
+          title={`Auto-Speak responses: ${autoSpeak}. Click to toggle between ON and OFF.`}
+        >
+          <span>{autoSpeak === 'ON' ? '🔊' : '🔇'}</span>
+          <span>SPEAK: {autoSpeak}</span>
+        </button>
+        {/* Mic Indicator & Real Acoustic Level Visualizer */}
         <button
           onClick={onToggleMic}
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
-            background: 'rgba(15, 23, 42, 0.6)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            padding: '6px 12px',
+            gap: '8px',
+            background: micState === 'MIC_LISTENING' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(15, 23, 42, 0.6)',
+            border: `1px solid ${micState === 'MIC_LISTENING' ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255, 255, 255, 0.1)'}`,
+            padding: '6px 14px',
             borderRadius: '20px',
-            color: '#cbd5e1',
+            color: micState === 'MIC_LISTENING' ? '#fca5a5' : '#cbd5e1',
             fontSize: '12px',
-            cursor: 'pointer'
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
           }}
+          title={micState === 'MIC_LISTENING' ? 'Click to stop live microphone capture' : 'Click to start live Windows microphone capture'}
         >
           <span style={{
             width: '8px',
             height: '8px',
             borderRadius: '50%',
-            backgroundColor: micStatus === 'LISTENING' ? '#ef4444' : micStatus === 'READY' ? '#10b981' : '#64748b',
-            boxShadow: micStatus === 'LISTENING' ? '0 0 10px #ef4444' : 'none'
+            backgroundColor: getMicColor(),
+            boxShadow: micState === 'MIC_LISTENING' ? '0 0 10px #ef4444' : 'none'
           }} />
-          <span>MIC: {micStatus}</span>
+          <span>{getMicLabel()}</span>
+
+          {/* Real-time acoustic level waveform bars (active when listening) */}
+          {micState === 'MIC_LISTENING' && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '2px',
+              height: '14px',
+              paddingLeft: '4px'
+            }}>
+              {[0.6, 1.0, 0.8, 1.1, 0.7].map((factor, idx) => {
+                const barHeight = Math.max(3, Math.min(14, Math.round((micLevel || 0.1) * factor * 14)));
+                return (
+                  <span
+                    key={idx}
+                    style={{
+                      width: '2.5px',
+                      height: `${barHeight}px`,
+                      backgroundColor: '#ef4444',
+                      borderRadius: '1px',
+                      transition: 'height 0.08s ease-out'
+                    }}
+                  />
+                );
+              })}
+            </div>
+          )}
         </button>
 
         {/* Cloud / Local Mode Indicator */}

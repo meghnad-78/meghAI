@@ -200,6 +200,158 @@ export class AmbiguityEngine {
   }
 }
 
+export interface ParsedMemoryCommand {
+  action: 'STORE' | 'FORGET';
+  content: string;
+  type: 'SEMANTIC' | 'PREFERENCE' | 'PROCEDURAL' | 'EPISODIC';
+  scope: 'PERSONAL' | 'WORKSPACE' | 'PROJECT';
+  confidence: number;
+  source: 'USER_EXPLICIT_COMMAND';
+  sensitivity: 'PUBLIC' | 'PERSONAL' | 'CONFIDENTIAL' | 'RESTRICTED';
+}
+
+/**
+ * Natural-Language Memory Command Parser
+ * Decomposes explicit user memory directives and disambiguates from casual conversation.
+ */
+export class MemoryCommandParser {
+  private static readonly TALKING_ABOUT_MEMORY_REGEX =
+    /\b(?:i|we|they|he|she)\s+(?:still\s+)?remember(?:ed|s)?\b|\b(?:as\s+far\s+as\s+i\s+remember|if\s+i\s+remember\s+correctly)\b|^(?:do|did|can|could|will|would)\s+you\s+remember\b|\bmujhe\s+yaad\s+hai\b|\bamar\s+mone\s+ache\b/i;
+
+  public static isMemoryCommand(text: string): { isCommand: boolean; action?: 'STORE' | 'FORGET' } {
+    const trimmed = text.trim();
+    if (this.TALKING_ABOUT_MEMORY_REGEX.test(trimmed)) {
+      return { isCommand: false };
+    }
+
+    // Strip wake and courtesy prefixes
+    const withoutPrefix = trimmed
+      .replace(/^(?:hey\s+megh[,:]?\s*|megh[,:]?\s*|please\s+)+/i, '')
+      .trim();
+
+    const lower = withoutPrefix.toLowerCase();
+
+    // Check FORGET
+    const isForget =
+      /^(?:forget\b|delete\s+(?:the\s+)?memory\b|remove\s+(?:the\s+)?memory\b|remove\s+what\s+you\s+remembered\b|bhul\s+jao\b)/i.test(lower);
+    if (isForget) {
+      return { isCommand: true, action: 'FORGET' };
+    }
+
+    // Check STORE
+    const isStore =
+      /^(?:remember\b|don'?t\s+forget\b|never\s+forget\b|keep\s+in\s+mind\b|save\s+(?:this\s+as\s+(?:a\s+)?preference|as\s+(?:a\s+)?preference|this\s+to\s+memory|this\s+in\s+memory|this|that)\b|store\s+this\b|note\s+that\b|yaad\s+rakhna\b|yad\s+rakhna\b|mone\s+rekho\b)/i.test(lower);
+    if (isStore) {
+      return { isCommand: true, action: 'STORE' };
+    }
+
+    return { isCommand: false };
+  }
+
+  public static parse(text: string): ParsedMemoryCommand {
+    const trimmed = text.trim();
+    const withoutPrefix = trimmed
+      .replace(/^(?:hey\s+megh[,:]?\s*|megh[,:]?\s*|please\s+)+/i, '')
+      .trim();
+
+    const check = this.isMemoryCommand(text);
+    const action: 'STORE' | 'FORGET' = check.action || 'STORE';
+
+    if (action === 'FORGET') {
+      let target = withoutPrefix.replace(
+        /^(?:forget\s+(?:that|about|what\s+you\s+remembered\s+about|my)?|delete\s+(?:the\s+)?memory\s+(?:that|about)?|remove\s+(?:what\s+you\s+remembered\s+about|(?:the\s+)?memory\s+(?:that|about)?)|bhul\s+jao\s*(?:ki)?)\s*/i,
+        ''
+      );
+      target = target.replace(/^[.,:;!?]+|[.,:;!?]+$/g, '').trim();
+
+      return {
+        action: 'FORGET',
+        content: target,
+        type: 'SEMANTIC',
+        scope: 'PERSONAL',
+        confidence: 0.98,
+        source: 'USER_EXPLICIT_COMMAND',
+        sensitivity: 'PERSONAL'
+      };
+    }
+
+    // STORE
+    let payload = withoutPrefix.replace(
+      /^(?:remember\s+(?:that|my|to|this[:\s]*|i\b)?|don'?t\s+forget\s+(?:that|to|my)?|never\s+forget\s+(?:that|to|my)?|keep\s+in\s+mind\s+(?:that|this[:\s]*)?|save\s+this\s+as\s+(?:a\s+)?preference[:\s]*|save\s+as\s+(?:a\s+)?preference[:\s]*|save\s+this\s+to\s+memory[:\s]*|save\s+this\s+in\s+memory[:\s]*|save\s+this[:\s]*|save\s+that[:\s]*|store\s+this\s+in\s+memory[:\s]*|store\s+this[:\s]*|store\s+that[:\s]*|note\s+that\s+|yaad\s+rakhna\s*(?:ki)?|yad\s+rakhna\s*(?:ki)?|mone\s+rekho\s*(?:je)?)\s*/i,
+      ''
+    ).trim();
+
+    // If "my ..." was stripped or remains, keep intact
+    if (withoutPrefix.toLowerCase().startsWith('remember my ') && !payload.toLowerCase().startsWith('my ')) {
+      payload = 'My ' + payload;
+    }
+
+    if (payload.length > 0) {
+      payload = payload.charAt(0).toUpperCase() + payload.slice(1);
+    }
+    if (!payload.endsWith('.') && !payload.endsWith('!') && !payload.endsWith('?')) {
+      payload += '.';
+    }
+
+    // Determine type
+    const lowerPayload = payload.toLowerCase();
+    let type: 'SEMANTIC' | 'PREFERENCE' | 'PROCEDURAL' | 'EPISODIC' = 'SEMANTIC';
+    if (
+      withoutPrefix.toLowerCase().includes('preference') ||
+      lowerPayload.includes('prefer') ||
+      lowerPayload.includes('preference') ||
+      lowerPayload.includes('concise') ||
+      lowerPayload.includes('favorite') ||
+      lowerPayload.includes('favourite') ||
+      lowerPayload.includes('like ') ||
+      lowerPayload.includes('likes ')
+    ) {
+      type = 'PREFERENCE';
+    } else if (
+      lowerPayload.includes('how to') ||
+      lowerPayload.includes('steps to') ||
+      lowerPayload.includes('procedure') ||
+      lowerPayload.includes('workflow')
+    ) {
+      type = 'PROCEDURAL';
+    } else if (
+      lowerPayload.includes('yesterday') ||
+      lowerPayload.includes('last week') ||
+      lowerPayload.includes('meeting with')
+    ) {
+      type = 'EPISODIC';
+    }
+
+    // Determine scope
+    let scope: 'PERSONAL' | 'WORKSPACE' | 'PROJECT' = 'PERSONAL';
+    if (
+      lowerPayload.includes('project') ||
+      lowerPayload.includes('workspace') ||
+      lowerPayload.includes('repo') ||
+      lowerPayload.includes('repository') ||
+      lowerPayload.includes('codebase')
+    ) {
+      scope = lowerPayload.includes('project') ? 'PROJECT' : 'WORKSPACE';
+    }
+
+    // Determine sensitivity
+    let sensitivity: 'PUBLIC' | 'PERSONAL' | 'CONFIDENTIAL' | 'RESTRICTED' = 'PERSONAL';
+    if (/\b(?:password|passwd|api[_-]?key|secret|token|credential|credentials|auth\s+token)\b/i.test(lowerPayload)) {
+      sensitivity = 'CONFIDENTIAL';
+    }
+
+    return {
+      action: 'STORE',
+      content: payload,
+      type,
+      scope,
+      confidence: 0.98,
+      source: 'USER_EXPLICIT_COMMAND',
+      sensitivity
+    };
+  }
+}
+
 /**
  * Intent Engine (Section 18)
  * Classifies intent family and supports compound requests.
@@ -213,11 +365,16 @@ export class IntentEngine {
     let primary: IntentFamily = 'CHAT';
     let confidence = 0.85;
 
+    // 0. Explicit Memory Commands (STORE / FORGET)
+    const memCheck = MemoryCommandParser.isMemoryCommand(text);
+    if (memCheck.isCommand) {
+      primary = 'MEMORY_OPERATION';
+      confidence = 0.98;
+    }
     // 1. Note Intents ("create a note", "note down", "write this down", "ek note banao")
-    if (
+    else if (
       lower.includes('note') ||
       lower.includes('write this down') ||
-      lower.includes('yad rakhna') ||
       lower.includes('note down')
     ) {
       primary = 'NOTE';

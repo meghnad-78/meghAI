@@ -32,6 +32,7 @@ export interface AssembledSystemContext {
   activeWorkspace?: string;
   currentTaskGoal?: string;
   recalledMemories: Array<{ content: string; layer: string; confidence: number }>;
+  formattedMemoryContext: string;
   knowledgeSnippets: string[];
   recentActions: string[];
   tokenEstimate: number;
@@ -132,35 +133,182 @@ export class MemoryManager {
     return true;
   }
 
+  public async deleteMemory(id: string): Promise<boolean> {
+    const mem = await this.db.getMemory(id);
+    if (!mem) return false;
+    if (mem.locked) {
+      throw new Error(`Cannot delete memory '${id}': Memory is locked by user policy.`);
+    }
+    return this.db.deleteMemory(id);
+  }
+
+  public async forgetMemory(target: string): Promise<{ success: boolean; deletedCount: number; memory?: MemoryEntry }> {
+    const relevant = await this.retrieveRelevant(target, { limit: 1, minScore: 0.1, maxSensitivity: 'RESTRICTED' });
+    const match = relevant[0];
+    if (!match) {
+      return { success: false, deletedCount: 0 };
+    }
+    if (match.locked) {
+      throw new Error(`Cannot delete memory '${match.id}': Memory is locked by user policy.`);
+    }
+    const deleted = await this.db.deleteMemory(match.id);
+    return { success: deleted, deletedCount: deleted ? 1 : 0, memory: match };
+  }
+
   /**
-   * Relevance scoring: combines keyword match + confidence + access recency
+   * Multi-Factor Relevance Scoring & Policy Filter
+   * Supports: semantic/synonym keywords, user scope, workspace scope, sensitivity tier, expiration, and deduplication.
    */
-  public async retrieveRelevant(query: string, limit = 5, maxSensitivity: MemorySensitivity = 'PERSONAL'): Promise<MemoryEntry[]> {
-    const qLower = query.toLowerCase();
-    const terms = qLower.split(/\s+/).filter(t => t.length > 2);
-    const all = await this.db.listMemories();
+  public async retrieveRelevant(
+    query: string,
+    optionsOrLimit: number | {
+      limit?: number;
+      maxSensitivity?: MemorySensitivity;
+      userId?: string;
+      workspaceId?: string;
+      minScore?: number;
+    } = 5,
+    legacyMaxSensitivity: MemorySensitivity = 'PERSONAL'
+  ): Promise<MemoryEntry[]> {
+    const options = typeof optionsOrLimit === 'number'
+      ? { limit: optionsOrLimit, maxSensitivity: legacyMaxSensitivity }
+      : optionsOrLimit;
 
-    const scored = all.map(m => {
-      const lower = m.content.toLowerCase();
-      let matchCount = 0;
-      for (const t of terms) {
-        if (lower.includes(t)) matchCount++;
+    const limit = options.limit ?? 5;
+    const maxSensitivity = options.maxSensitivity ?? 'PERSONAL';
+    const minScore = options.minScore ?? 0.25;
+
+    const cleanedQuery = query.toLowerCase().replace(/[^\w\s]/g, ' ');
+    const rawTokens = cleanedQuery.split(/\s+/).filter(t => t.length > 1);
+
+    const STOP_WORDS = new Set([
+      'a', 'an', 'the', 'in', 'on', 'at', 'of', 'for', 'to', 'from', 'by', 'with', 'about', 'as',
+      'into', 'like', 'through', 'after', 'over', 'between', 'out', 'against', 'during', 'without',
+      'before', 'under', 'around', 'among', 'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
+      'have', 'has', 'had', 'do', 'does', 'did', 'can', 'could', 'will', 'would', 'shall', 'should',
+      'may', 'might', 'must', 'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you',
+      'your', 'yours', 'yourself', 'he', 'him', 'his', 'she', 'her', 'hers', 'it', 'its', 'they',
+      'them', 'their', 'what', 'which', 'who', 'whom', 'this', 'that', 'these', 'those', 'how',
+      'why', 'when', 'where', 'tell', 'know', 'remember'
+    ]);
+
+    const SYNONYM_MAP: Record<string, string[]> = {
+      prefer: ['preference', 'preferred', 'favorite', 'favourite', 'like', 'likes'],
+      preference: ['prefer', 'preferred', 'favorite', 'favourite', 'like', 'likes'],
+      favorite: ['favourite', 'prefer', 'preference', 'best', 'top'],
+      favourite: ['favorite', 'prefer', 'preference', 'best', 'top'],
+      language: ['lang', 'programming', 'code'],
+      programming: ['coding', 'language', 'code', 'software'],
+      coding: ['programming', 'language', 'code'],
+      style: ['manner', 'mode', 'response', 'concise', 'tone', 'brief'],
+      response: ['responses', 'answers', 'style', 'reply', 'replies', 'concise'],
+      responses: ['response', 'answers', 'style', 'reply', 'replies', 'concise'],
+      concise: ['short', 'brief', 'responses', 'style', 'succinct']
+    };
+
+    const queryTerms = rawTokens.filter(t => !STOP_WORDS.has(t));
+    if (queryTerms.length === 0 && rawTokens.length > 0) {
+      queryTerms.push(...rawTokens);
+    }
+
+    const SENSITIVITY_RANK: Record<MemorySensitivity, number> = {
+      PUBLIC: 0,
+      PERSONAL: 1,
+      CONFIDENTIAL: 2,
+      RESTRICTED: 3
+    };
+    const maxSensitivityLevel = SENSITIVITY_RANK[maxSensitivity] ?? 1;
+
+    const allMemories = await this.db.listMemories();
+    const now = Date.now();
+    const scored: Array<{ memory: MemoryEntry; score: number }> = [];
+
+    for (const mem of allMemories) {
+      // 1. Guard against malformed records
+      if (!mem || !mem.content || typeof mem.content !== 'string' || !mem.content.trim()) {
+        continue;
       }
-      const score = (matchCount / (terms.length || 1)) * ((m as any).confidence || 0.8);
-      return { memory: m, score };
-    });
 
-    return scored
-      .filter(item => item.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map(item => item.memory);
+      // 2. Expiration check
+      if ((mem as any).expiresAt) {
+        const expiry = new Date((mem as any).expiresAt).getTime();
+        if (!isNaN(expiry) && expiry < now) {
+          continue;
+        }
+      }
+
+      // 3. User scope filtering
+      if (options.userId && mem.userId && mem.userId !== 'default-user' && mem.userId !== options.userId) {
+        continue;
+      }
+
+      // 4. Sensitivity filtering
+      const memSensitivity: MemorySensitivity = (mem as any).sensitivity || 'PERSONAL';
+      const memLevel = SENSITIVITY_RANK[memSensitivity] ?? 1;
+      if (memLevel > maxSensitivityLevel) {
+        continue;
+      }
+
+      // 5. Keyword & semantic matching
+      const memLower = mem.content.toLowerCase().replace(/[^\w\s]/g, ' ');
+      const memTokens = new Set(memLower.split(/\s+/).filter(t => t.length > 1));
+
+      let matchedCount = 0;
+      for (const qTerm of queryTerms) {
+        if (memTokens.has(qTerm) || memLower.includes(qTerm)) {
+          matchedCount++;
+          continue;
+        }
+        const synonyms = SYNONYM_MAP[qTerm] || [];
+        for (const syn of synonyms) {
+          if (memTokens.has(syn) || memLower.includes(syn)) {
+            matchedCount++;
+            break;
+          }
+        }
+      }
+
+      if (matchedCount === 0) {
+        continue;
+      }
+
+      const matchRatio = matchedCount / (queryTerms.length || 1);
+      const confidence = (mem as any).confidence ?? 0.85;
+      const importance = mem.importance || 1;
+
+      let workspaceBoost = 0;
+      if (options.workspaceId && (mem as any).workspaceId === options.workspaceId) {
+        workspaceBoost = 0.2;
+      }
+
+      const score = (matchRatio * 0.8 + workspaceBoost) * confidence * Math.min(1.5, importance);
+
+      if (score >= minScore) {
+        scored.push({ memory: mem, score });
+      }
+    }
+
+    // Deduplicate identical content and sort by score descending
+    const seenContent = new Set<string>();
+    const uniqueScored: Array<{ memory: MemoryEntry; score: number }> = [];
+
+    scored.sort((a, b) => b.score - a.score);
+
+    for (const item of scored) {
+      const normalizedContent = item.memory.content.trim().toLowerCase();
+      if (!seenContent.has(normalizedContent)) {
+        seenContent.add(normalizedContent);
+        uniqueScored.push(item);
+      }
+    }
+
+    return uniqueScored.slice(0, limit).map(item => item.memory);
   }
 }
 
 /**
  * Context Engine (Section 20 & Phase 1.9)
- * Assembles selective, permission-aware system context
+ * Assembles selective, permission-aware system context with structured memory formatting
  */
 export class ContextEngine {
   constructor(
@@ -203,13 +351,21 @@ export class ContextEngine {
       }
     }
 
-    // 3. Relevant Memories
-    const relevantMemories = await this.memoryManager.retrieveRelevant(options.query, 4);
+    // 3. Relevant Memories with structured formatting
+    const relevantMemories = await this.memoryManager.retrieveRelevant(options.query, {
+      limit: 4,
+      workspaceId: options.activeWorkspace
+    });
+
     const recalled = relevantMemories.map(m => ({
       content: m.content,
       layer: m.type,
       confidence: (m as any).confidence ?? 0.9
     }));
+
+    const formattedMemoryContext = recalled.length > 0
+      ? `RELEVANT USER MEMORY:\n${recalled.map(m => `- ${m.content}`).join('\n')}`
+      : '';
 
     // 4. Token estimation
     const totalChars =
@@ -218,7 +374,7 @@ export class ContextEngine {
       (screenSummary?.length || 0) +
       (options.activeWorkspace?.length || 0) +
       (options.currentTaskGoal?.length || 0) +
-      recalled.reduce((acc, m) => acc + m.content.length, 0);
+      formattedMemoryContext.length;
 
     const tokenEstimate = Math.ceil(totalChars / 4);
 
@@ -229,6 +385,7 @@ export class ContextEngine {
       activeWorkspace: options.activeWorkspace,
       currentTaskGoal: options.currentTaskGoal,
       recalledMemories: recalled,
+      formattedMemoryContext,
       knowledgeSnippets: [],
       recentActions: (options.recentActions || []).slice(-5),
       tokenEstimate,

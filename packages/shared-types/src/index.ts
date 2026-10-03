@@ -18,6 +18,7 @@ export type AIState =
   | 'EXECUTING'
   | 'VERIFYING'
   | 'RESPONDING'
+  | 'SPEAKING'
   | 'WAITING_FOR_CONFIRMATION'
   | 'PAUSED'
   | 'COMPLETED'
@@ -424,8 +425,38 @@ export interface WorkspaceEntry {
 export type EventType =
   | 'USER_INPUT_RECEIVED'
   | 'WAKE_DETECTED'
+  | 'MIC_STARTING'
+  | 'MIC_READY'
+  | 'MIC_LISTENING'
+  | 'MIC_LEVEL'
+  | 'MIC_STOPPING'
+  | 'MIC_OFF'
+  | 'MIC_ERROR'
+  | 'MIC_DEVICE_UNAVAILABLE'
+  | 'VAD_SPEECH_STARTED'
+  | 'VAD_SPEECH_ENDED'
+  | 'VOICE_INPUT_STATE_CHANGED'
+  | 'VOICE_COMMAND_RECEIVED'
+  | 'VOICE_TRANSCRIBING'
+  | 'TRANSCRIPT_PARTIAL'
+  | 'TRANSCRIPT_FINAL'
   | 'STT_STARTED'
   | 'STT_COMPLETED'
+  | 'TTS_REQUESTED'
+  | 'TTS_STARTED'
+  | 'TTS_AUDIO_READY'
+  | 'AUDIO_PLAYBACK_STARTED'
+  | 'SPEAKING'
+  | 'AUDIO_PLAYBACK_COMPLETED'
+  | 'TTS_COMPLETED'
+  | 'TTS_FAILED'
+  | 'AUDIO_PLAYBACK_FAILED'
+  | 'TTS_INTERRUPTED'
+  | 'AUDIO_CUE_STARTED'
+  | 'AUDIO_CUE_COMPLETED'
+  | 'AUDIO_STATE_CHANGED'
+  | 'VOICE_ERROR'
+  | 'INTERRUPTED'
   | 'LANGUAGE_DETECTED'
   | 'INTENT_CLASSIFIED'
   | 'CONTEXT_RETRIEVED'
@@ -445,8 +476,11 @@ export type EventType =
   | 'TASK_FAILED'
   | 'TASK_CANCELLED'
   | 'KILL_SWITCH_ACTIVATED'
+  | 'MEMORY_COMMAND_DETECTED'
   | 'MEMORY_CANDIDATE_CREATED'
   | 'MEMORY_PROMOTED'
+  | 'MEMORY_STORED'
+  | 'MEMORY_DELETED'
   | 'ROUTINE_TRIGGERED'
   | 'AI_STATE_CHANGED';
 
@@ -468,24 +502,191 @@ export type PersonalityMode =
   | 'FUTURISTIC_COMPANION'
   | 'CALM_ASSISTANT';
 
+export type VoiceProviderId =
+  | 'windows-sapi'
+  | 'windows-onecore'
+  | 'google-cloud'
+  | 'elevenlabs'
+  | 'local-offline'
+  | 'local'
+  | 'google';
+
+export interface VoiceCapability {
+  speedSupport: boolean;
+  pitchSupport: boolean;
+  emotionSupport: boolean;
+  styleSupport: boolean;
+  streamingSupport: boolean;
+}
+
 export interface VoiceProfile {
   id: string;
   name: string;
-  provider: 'local' | 'elevenlabs' | 'google' | 'azure' | 'openai';
+  displayName?: string;
+  provider: VoiceProviderId;
+  providerVoiceId?: string;
   language: string;
+  locale?: string;
   accent?: string;
   gender: 'female' | 'male' | 'neutral';
+  description?: string;
+  style?: string;
+  tone?: string;
+  naturalness?: 'standard' | 'neural' | 'studio' | 'generative';
+  capabilities?: VoiceCapability;
   sampleAudioUrl?: string;
+  supportsPreview?: boolean;
+  supportsStreaming?: boolean;
+  requiresApiKey?: boolean;
   isAvailable: boolean;
+  available?: boolean;
+  availabilityReason?: string;
 }
+
+export type AutoSpeakMode = 'OFF' | 'ON' | 'ASK';
 
 export interface VoiceSettings {
   selectedVoiceId: string;
+  selectedProvider?: VoiceProviderId;
   speechRate: number; // 0.5 to 2.0 (default 1.0)
   pitch: number; // 0.5 to 1.5 (default 1.0)
   volume: number; // 0.0 to 1.0 (default 1.0)
   personalityMode: PersonalityMode;
+  autoSpeak: AutoSpeakMode;
 }
+
+export interface TTSOptions {
+  voiceId?: string;
+  speechRate?: number; // 0.5 to 2.0 (default 1.0)
+  pitch?: number;      // 0.5 to 1.5 (default 1.0)
+  volume?: number;     // 0.0 to 1.0 (default 1.0)
+  outputFormat?: 'wav' | 'mp3';
+}
+
+export interface TTSSynthesisResult {
+  audioFilePath?: string;
+  audioBuffer?: Buffer;
+  audioBase64?: string;
+  durationMs?: number;
+  format: 'wav' | 'mp3';
+  sampleRate?: number;
+  voiceId: string;
+  spokenText: string;
+}
+
+export interface TTSProvider {
+  readonly id: string;
+  readonly name: string;
+  listVoices(): Promise<VoiceProfile[]>;
+  synthesize(text: string, options?: TTSOptions): Promise<TTSSynthesisResult>;
+  isAvailable(): Promise<boolean>;
+}
+
+export type AudioOutputState =
+  | 'IDLE'
+  | 'PLAYING_CUE'
+  | 'PLAYING_TTS'
+  | 'STOPPING'
+  | 'ERROR';
+
+export type AudioCueType =
+  | 'startup'
+  | 'listening'
+  | 'thinking'
+  | 'answer_ready'
+  | 'interrupt';
+
+export interface AudioPlaybackStatus {
+  isPlaying: boolean;
+  state?: AudioOutputState;
+  currentVoiceId?: string;
+  currentText?: string;
+  activeCue?: AudioCueType;
+  startTime?: number;
+  error?: string;
+}
+
+export type MicrophoneState =
+  | 'MIC_OFF'
+  | 'MIC_READY'
+  | 'MIC_STARTING'
+  | 'MIC_LISTENING'
+  | 'MIC_ERROR'
+  | 'MIC_DEVICE_UNAVAILABLE'
+  | 'MIC_STOPPING';
+
+export interface AudioFrame {
+  timestamp: number;
+  sampleRate: number;      // 16000
+  channels: number;        // 1 (mono)
+  format: 'pcm_s16le';     // 16-bit signed PCM little-endian
+  sequenceNumber: number;  // 1, 2, 3...
+  durationMs: number;      // e.g. 100ms
+  data: Buffer;            // binary PCM buffer
+  rms: number;             // Root-Mean-Square signal level
+  peak: number;            // Peak absolute amplitude (0..32767)
+  normalizedLevel: number; // Normalized level (0.0..1.0)
+}
+
+export interface AudioCaptureDiagnostics {
+  sampleRate: number;
+  channels: number;
+  format: string;
+  frameCount: number;
+  totalBytes: number;
+  currentRms: number;
+  peakLevel: number;
+  normalizedLevel: number;
+  streamDurationMs: number;
+  activeDevice: string;
+  isLive: boolean;
+  state: MicrophoneState;
+}
+
+export type VADState = 'SILENCE' | 'SPEECH';
+
+export interface VADFrameResult {
+  isSpeech: boolean;
+  state: VADState;
+  speechDurationMs: number;
+  silenceDurationMs: number;
+  rms: number;
+  threshold: number;
+}
+
+export type VoiceInputState =
+  | 'IDLE'
+  | 'PASSIVE_WAKE_LISTENING'
+  | 'WAKE_CONFIRMED'
+  | 'COMMAND_CAPTURE'
+  | 'TRANSCRIBING'
+  | 'PROCESSING'
+  | 'SPEAKING'
+  | 'ERROR';
+
+export interface STTResult {
+  text: string;
+  confidence: number;
+  culture?: string;
+  language?: string;
+  durationMs?: number;
+  isFinal: boolean;
+}
+
+export interface STTProvider {
+  readonly id: string;
+  readonly name: string;
+  transcribe(audioBuffer: Buffer, options?: { culture?: string; sampleRate?: number }): Promise<STTResult>;
+  isAvailable(): Promise<boolean> | boolean;
+}
+
+export interface WakeWordResult {
+  detected: boolean;
+  phrase?: string;
+  confidence?: number;
+  rawText?: string;
+}
+
 
 // ---------------------------------------------------------------------------
 // 13. Routines & Proactivity (Section 94, 95)

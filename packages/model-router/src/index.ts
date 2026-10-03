@@ -520,8 +520,17 @@ export class DeepSeekProvider extends BaseProvider {
  * Local AI / Ollama Provider Adapter (100% Offline, $0 / ₹0)
  */
 export class LocalOllamaProvider extends BaseProvider {
-  constructor(private hostUrl = process.env['OLLAMA_HOST'] || 'http://127.0.0.1:11434') {
+  private hostUrl: string;
+  private defaultModel: string;
+
+  constructor(
+    hostUrl?: string,
+    defaultModel?: string
+  ) {
     super('local-ollama', 'Local Ollama (Offline)');
+    const resolvedHost = hostUrl || process.env['OLLAMA_BASE_URL'] || process.env['OLLAMA_HOST'] || 'http://localhost:11434';
+    this.hostUrl = resolvedHost.replace(/\/+$/, '');
+    this.defaultModel = defaultModel || process.env['OLLAMA_MODEL'] || 'llama3.2:latest';
   }
 
   public override isConfigured(): boolean {
@@ -531,9 +540,9 @@ export class LocalOllamaProvider extends BaseProvider {
   public getModels(): ModelDescriptor[] {
     return [
       {
-        id: 'llama3.2:latest',
+        id: this.defaultModel,
         providerId: 'local-ollama',
-        name: 'Llama 3.2 (Local)',
+        name: `Llama 3.2 (${this.defaultModel})`,
         isLocal: true,
         costPer1kInputTokensUSD: 0,
         costPer1kOutputTokensUSD: 0,
@@ -556,59 +565,144 @@ export class LocalOllamaProvider extends BaseProvider {
   }
 
   public async checkHealth(): Promise<ProviderHealth> {
+    const startTime = Date.now();
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 1200);
+      const timeout = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(`${this.hostUrl}/api/tags`, { signal: controller.signal });
       clearTimeout(timeout);
       if (res.ok) {
-        return { available: true, latencyMs: 15, isConfigured: true };
+        return {
+          available: true,
+          latencyMs: Math.max(1, Date.now() - startTime),
+          isConfigured: true
+        };
       }
-      return { available: false, latencyMs: 0, isConfigured: true, message: 'Local Ollama daemon not reachable' };
-    } catch {
-      return { available: false, latencyMs: 0, isConfigured: true, message: 'Local Ollama daemon offline' };
+      return {
+        available: false,
+        latencyMs: 0,
+        isConfigured: true,
+        message: `Local Ollama daemon returned status ${res.status}`
+      };
+    } catch (err: any) {
+      return {
+        available: false,
+        latencyMs: 0,
+        isConfigured: true,
+        message: `Local Ollama daemon offline: ${err?.message || 'Connection refused'}`
+      };
     }
   }
 
   public async complete(request: ModelRequest): Promise<ModelResponse> {
     const startTime = Date.now();
-    const model = request.modelId || 'llama3.2:latest';
-    const prompt = request.messages.map((m: ModelMessage) => `${m.role}: ${m.content}`).join('\n');
+    const model = request.modelId || this.defaultModel;
+    const timeoutMs = 60000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(`${this.hostUrl}/api/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, prompt, stream: false }),
-        signal: controller.signal
-      });
-      clearTimeout(timeout);
+      const messages = request.messages.map((m: ModelMessage) => ({
+        role: m.role,
+        content: m.content
+      }));
 
-      if (!res.ok) {
-        throw new Error(`Ollama call failed with status ${res.status}`);
+      let content = '';
+      let promptTokens = 0;
+      let completionTokens = 0;
+
+      let res: Response;
+      try {
+        res = await fetch(`${this.hostUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages,
+            stream: false
+          }),
+          signal: controller.signal
+        });
+      } catch (networkErr: any) {
+        if (controller.signal.aborted) {
+          throw new Error(`LOCAL_MODEL_TIMEOUT: Ollama request timed out after ${timeoutMs}ms`);
+        }
+        throw new Error(`LOCAL_MODEL_UNAVAILABLE: Could not connect to Ollama daemon at ${this.hostUrl}: ${networkErr?.message || networkErr}`);
+      } finally {
+        clearTimeout(timeoutId);
       }
 
-      const data = await res.json() as any;
+      if (res.status === 404) {
+        // Check if model not found or endpoint not found
+        const errText = await res.text().catch(() => '');
+        if (errText.includes('model') && (errText.includes('not found') || errText.includes('try pulling it'))) {
+          throw new Error(`LOCAL_MODEL_NOT_FOUND: Model '${model}' not found in Ollama.`);
+        }
+
+        // Fallback to /api/generate for older Ollama daemon versions
+        const genController = new AbortController();
+        const genTimeout = setTimeout(() => genController.abort(), timeoutMs);
+        try {
+          const prompt = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+          const genRes = await fetch(`${this.hostUrl}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model, prompt, stream: false }),
+            signal: genController.signal
+          });
+          clearTimeout(genTimeout);
+
+          if (!genRes.ok) {
+            const genErrText = await genRes.text().catch(() => '');
+            if (genRes.status === 404 && genErrText.includes('model')) {
+              throw new Error(`LOCAL_MODEL_NOT_FOUND: Model '${model}' not found in Ollama.`);
+            }
+            throw new Error(`LOCAL_MODEL_ERROR: Ollama /api/generate returned status ${genRes.status}: ${genErrText}`);
+          }
+
+          const genData = await genRes.json() as any;
+          content = genData.response || '';
+          promptTokens = genData.prompt_eval_count || 0;
+          completionTokens = genData.eval_count || 0;
+        } catch (genErr: any) {
+          clearTimeout(genTimeout);
+          if (genController.signal.aborted) {
+            throw new Error(`LOCAL_MODEL_TIMEOUT: Ollama request timed out after ${timeoutMs}ms`);
+          }
+          throw genErr;
+        }
+      } else if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        if (errText.includes('model') && (errText.includes('not found') || errText.includes('try pulling it'))) {
+          throw new Error(`LOCAL_MODEL_NOT_FOUND: Model '${model}' not found in Ollama.`);
+        }
+        throw new Error(`LOCAL_MODEL_ERROR: Ollama /api/chat returned status ${res.status}: ${errText}`);
+      } else {
+        const data = await res.json() as any;
+        content = data.message?.content || data.response || '';
+        promptTokens = data.prompt_eval_count || 0;
+        completionTokens = data.eval_count || 0;
+      }
+
+      if (!content || !content.trim()) {
+        throw new Error('LOCAL_MODEL_EMPTY: Ollama returned an empty response.');
+      }
+
       return {
-        content: data.response || '',
+        content: content.trim(),
         providerId: 'local-ollama',
         modelId: model,
-        tokensUsed: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        tokensUsed: {
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens
+        },
         latencyMs: Date.now() - startTime,
         finishReason: 'stop'
       };
     } catch (err: any) {
-      // Deterministic offline fallback when local daemon binary is not actively running in test environment
-      return {
-        content: `[MeghAI Local Offline Intelligence] Processing complete for query: ${request.messages[request.messages.length - 1]?.content || ''}`,
-        providerId: 'local-ollama',
-        modelId: model,
-        tokensUsed: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-        latencyMs: Date.now() - startTime,
-        finishReason: 'stop'
-      };
+      clearTimeout(timeoutId);
+      throw err;
     }
   }
 }
@@ -748,7 +842,7 @@ export class MultiModelExecutionEngine {
       goal,
       complexity: 'MULTI_MODEL',
       finalSynthesis: lastStep ? lastStep.output : 'Execution completed.',
-      totalLatencyMs: Date.now() - startTime,
+      totalLatencyMs: Math.max(1, Date.now() - startTime),
       totalCostUSD: Number(totalCostUSD.toFixed(6)),
       steps: executedSteps,
       success: true
@@ -808,6 +902,8 @@ export class ModelRouter {
     else if (routingMode === 'MULTI_MODEL') complexity = 'MULTI_MODEL';
     else if (options.requiresReasoning || options.requiresLongContext) complexity = 'DEEP';
 
+    const localModel = this.providers.get('local-ollama')?.getModels()[0]?.id || process.env['OLLAMA_MODEL'] || 'llama3.2:latest';
+
     // 1. Explicit user override
     if (request.providerId && this.providers.has(request.providerId)) {
       const prov = this.providers.get(request.providerId)!;
@@ -815,7 +911,7 @@ export class ModelRouter {
         selectedProvider: prov.id,
         selectedModel: request.modelId || prov.getModels()[0]?.id || 'default',
         routingReason: `User explicitly specified provider '${prov.name}'.`,
-        fallbackChain: [{ providerId: 'local-ollama', modelId: 'llama3.2:latest' }],
+        fallbackChain: [{ providerId: 'local-ollama', modelId: localModel }],
         executionMode: 'SINGLE_MODEL',
         complexity
       };
@@ -825,7 +921,7 @@ export class ModelRouter {
     if (privacyMode === 'LOCAL_ONLY' || routingMode === 'LOCAL_ONLY') {
       return {
         selectedProvider: 'local-ollama',
-        selectedModel: 'llama3.2:latest',
+        selectedModel: localModel,
         routingReason: 'Local-only privacy mode active; strictly routing to local offline model.',
         fallbackChain: [],
         executionMode: 'SINGLE_MODEL',
@@ -848,7 +944,7 @@ export class ModelRouter {
         fallbackChain: [
           ...(openai && openai.isConfigured() ? [{ providerId: 'openai' as ModelProviderId, modelId: 'gpt-4o' }] : []),
           ...(deepseek && deepseek.isConfigured() ? [{ providerId: 'deepseek' as ModelProviderId, modelId: 'deepseek-chat' }] : []),
-          { providerId: 'local-ollama' as ModelProviderId, modelId: 'llama3.2:latest' }
+          { providerId: 'local-ollama' as ModelProviderId, modelId: localModel }
         ],
         executionMode: routingMode === 'MULTI_MODEL' ? 'MULTI_MODEL' : 'SINGLE_MODEL',
         complexity
@@ -860,7 +956,7 @@ export class ModelRouter {
         selectedProvider: 'openai',
         selectedModel: options.requiresVision ? 'gpt-4o' : 'gpt-4o-mini',
         routingReason: 'Auto-selected OpenAI as active configured provider.',
-        fallbackChain: [{ providerId: 'local-ollama' as ModelProviderId, modelId: 'llama3.2:latest' }],
+        fallbackChain: [{ providerId: 'local-ollama' as ModelProviderId, modelId: localModel }],
         executionMode: 'SINGLE_MODEL',
         complexity
       };
@@ -871,7 +967,7 @@ export class ModelRouter {
         selectedProvider: 'anthropic',
         selectedModel: options.requiresReasoning ? 'claude-3-5-sonnet' : 'claude-3-5-haiku',
         routingReason: 'Auto-selected Anthropic Claude as active configured provider.',
-        fallbackChain: [{ providerId: 'local-ollama' as ModelProviderId, modelId: 'llama3.2:latest' }],
+        fallbackChain: [{ providerId: 'local-ollama' as ModelProviderId, modelId: localModel }],
         executionMode: 'SINGLE_MODEL',
         complexity
       };
@@ -880,7 +976,7 @@ export class ModelRouter {
     // 4. Default to Offline Local Mode ($0 / ₹0)
     return {
       selectedProvider: 'local-ollama',
-      selectedModel: 'llama3.2:latest',
+      selectedModel: localModel,
       routingReason: 'No cloud provider API keys configured. Running in Local Mode with zero cloud dependencies.',
       fallbackChain: [],
       executionMode: 'SINGLE_MODEL',

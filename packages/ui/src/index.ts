@@ -90,6 +90,12 @@ export const AI_STATE_THEMES: Record<
     label: 'RESPONDING',
     animationSpeed: 2.0,
   },
+  SPEAKING: {
+    primaryColor: MEGHAI_COLORS.purpleNeon,
+    glowColor: 'rgba(168, 85, 247, 0.65)',
+    label: 'SPEAKING',
+    animationSpeed: 2.2,
+  },
   WAITING_FOR_CONFIRMATION: {
     primaryColor: MEGHAI_COLORS.amberWarning,
     glowColor: 'rgba(245, 158, 11, 0.6)',

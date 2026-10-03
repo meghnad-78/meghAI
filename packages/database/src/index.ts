@@ -210,6 +210,20 @@ export class MeghAIDatabase {
     return this.state.memories.filter(m => m.type === type);
   }
 
+  public async getMemory(id: string): Promise<MemoryEntry | null> {
+    await this.init();
+    return this.state.memories.find(m => m.id === id) || null;
+  }
+
+  public async deleteMemory(id: string): Promise<boolean> {
+    await this.init();
+    const index = this.state.memories.findIndex(m => m.id === id);
+    if (index === -1) return false;
+    this.state.memories.splice(index, 1);
+    await this.persistState();
+    return true;
+  }
+
   // ---------------------------------------------------------------------------
   // Conversations Subsystem
   // ---------------------------------------------------------------------------

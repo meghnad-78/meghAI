@@ -28,6 +28,9 @@ export class MeghAIDatabase {
         }
         this.dbFilePath = path.join(this.dataDir, 'meghai_store.json');
     }
+    getStoragePath() {
+        return this.dbFilePath;
+    }
     async init() {
         if (this.isLoaded)
             return;
@@ -169,6 +172,19 @@ export class MeghAIDatabase {
         if (!type)
             return [...this.state.memories];
         return this.state.memories.filter(m => m.type === type);
+    }
+    async getMemory(id) {
+        await this.init();
+        return this.state.memories.find(m => m.id === id) || null;
+    }
+    async deleteMemory(id) {
+        await this.init();
+        const index = this.state.memories.findIndex(m => m.id === id);
+        if (index === -1)
+            return false;
+        this.state.memories.splice(index, 1);
+        await this.persistState();
+        return true;
     }
     // ---------------------------------------------------------------------------
     // Conversations Subsystem

@@ -38,6 +38,27 @@ export declare class AmbiguityEngine {
         missingEntities: string[];
     };
 }
+export interface ParsedMemoryCommand {
+    action: 'STORE' | 'FORGET';
+    content: string;
+    type: 'SEMANTIC' | 'PREFERENCE' | 'PROCEDURAL' | 'EPISODIC';
+    scope: 'PERSONAL' | 'WORKSPACE' | 'PROJECT';
+    confidence: number;
+    source: 'USER_EXPLICIT_COMMAND';
+    sensitivity: 'PUBLIC' | 'PERSONAL' | 'CONFIDENTIAL' | 'RESTRICTED';
+}
+/**
+ * Natural-Language Memory Command Parser
+ * Decomposes explicit user memory directives and disambiguates from casual conversation.
+ */
+export declare class MemoryCommandParser {
+    private static readonly TALKING_ABOUT_MEMORY_REGEX;
+    static isMemoryCommand(text: string): {
+        isCommand: boolean;
+        action?: 'STORE' | 'FORGET';
+    };
+    static parse(text: string): ParsedMemoryCommand;
+}
 /**
  * Intent Engine (Section 18)
  * Classifies intent family and supports compound requests.
@@ -55,5 +76,55 @@ export declare class InputPipeline {
         intent: IntentClassification;
         timestamp: string;
     };
+}
+import type { DailyBrief, RoutineEntry, TaskEntry } from '@meghai/shared-types';
+/**
+ * Proactivity Budget & Quiet Hours Policy (Section 95)
+ * Prevents MeghAI from interrupting the user unnecessarily or during quiet hours.
+ */
+export declare class ProactivityBudget {
+    private quietStartHour;
+    private quietEndHour;
+    private maxDailyInterruptions;
+    private interruptionsToday;
+    private lastResetDate;
+    constructor(quietStartHour?: number, quietEndHour?: number, maxDailyInterruptions?: number);
+    checkBudget(date?: Date): {
+        allowed: boolean;
+        reason?: string;
+    };
+    recordInterruption(): void;
+    getStatus(): {
+        interruptionsUsed: number;
+        maxAllowed: number;
+        isQuietHours: boolean;
+    };
+}
+/**
+ * Routine Engine (Section 94)
+ * Manages recurring or trigger-based automation routines.
+ */
+export declare class RoutineEngine {
+    private routines;
+    constructor();
+    private seedDefaultRoutines;
+    listRoutines(): RoutineEntry[];
+    getRoutine(id: string): RoutineEntry | undefined;
+    toggleRoutine(id: string, isEnabled: boolean): RoutineEntry | undefined;
+    executeRoutine(id: string): {
+        success: boolean;
+        routine: RoutineEntry;
+        message: string;
+    };
+}
+/**
+ * Daily Brief Service (Section 94)
+ * Assembles and verifies the user's daily brief without hallucination or false success.
+ */
+export declare class DailyBriefService {
+    static generateBrief(tasks?: TaskEntry[], systemInfo?: {
+        status: "HEALTHY";
+        details: string;
+    }, userName?: string): DailyBrief;
 }
 //# sourceMappingURL=index.d.ts.map

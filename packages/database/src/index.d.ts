@@ -47,6 +47,7 @@ export declare class MeghAIDatabase {
     private isLoaded;
     private writeLock;
     constructor(customStorageDir?: string);
+    getStoragePath(): string;
     init(): Promise<void>;
     private persistState;
     createNote(note: CreateNoteInput): Promise<NoteEntry>;
@@ -62,6 +63,8 @@ export declare class MeghAIDatabase {
     listTasks(status?: string): Promise<TaskEntry[]>;
     createMemory(entry: MemoryEntry): Promise<MemoryEntry>;
     listMemories(type?: string): Promise<MemoryEntry[]>;
+    getMemory(id: string): Promise<MemoryEntry | null>;
+    deleteMemory(id: string): Promise<boolean>;
     createConversation(title: string, userId?: string): Promise<ConversationEntry>;
     addMessage(conversationId: string, message: ModelMessage): Promise<ModelMessage & {
         id: string;

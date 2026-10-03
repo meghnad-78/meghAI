@@ -27,7 +27,11 @@
       "@meghai/ai-core": ["packages/ai-core/src/index.ts", "../ai-core/src/index.ts", "../../packages/ai-core/src/index.ts"],
       "@meghai/model-router": ["packages/model-router/src/index.ts", "../model-router/src/index.ts", "../../packages/model-router/src/index.ts"],
       "@meghai/memory": ["packages/memory/src/index.ts", "../memory/src/index.ts", "../../packages/memory/src/index.ts"],
-      "@meghai/windows": ["packages/windows/src/index.ts", "../windows/src/index.ts", "../../packages/windows/src/index.ts"]
+      "@meghai/windows": ["packages/windows/src/index.ts", "../windows/src/index.ts", "../../packages/windows/src/index.ts"],
+      "@meghai/knowledge-graph": ["packages/knowledge-graph/src/index.ts", "../knowledge-graph/src/index.ts", "../../packages/knowledge-graph/src/index.ts"],
+      "@meghai/voice": ["packages/voice/src/index.ts", "../voice/src/index.ts", "../../packages/voice/src/index.ts"],
+      "@meghai/integrations": ["packages/integrations/src/index.ts", "../integrations/src/index.ts", "../../packages/integrations/src/index.ts"],
+      "@meghai/observability": ["packages/observability/src/index.ts", "../observability/src/index.ts", "../../packages/observability/src/index.ts"]
     }
   }
 }

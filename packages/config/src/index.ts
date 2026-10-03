@@ -17,6 +17,8 @@ export interface MeghAIConfig {
     grokApiKey?: string;
     perplexityApiKey?: string;
     ollamaHost: string;
+    ollamaBaseUrl?: string;
+    ollamaModel?: string;
   };
 }
 
@@ -39,7 +41,9 @@ export function loadConfig(): MeghAIConfig {
       deepseekApiKey: process.env['DEEPSEEK_API_KEY'],
       grokApiKey: process.env['XAI_API_KEY'],
       perplexityApiKey: process.env['PERPLEXITY_API_KEY'],
-      ollamaHost: process.env['OLLAMA_HOST'] || 'http://127.0.0.1:11434'
+      ollamaHost: process.env['OLLAMA_BASE_URL'] || process.env['OLLAMA_HOST'] || 'http://localhost:11434',
+      ollamaBaseUrl: process.env['OLLAMA_BASE_URL'] || process.env['OLLAMA_HOST'] || 'http://localhost:11434',
+      ollamaModel: process.env['OLLAMA_MODEL'] || 'llama3.2:latest'
     }
   };
 }

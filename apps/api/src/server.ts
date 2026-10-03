@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import {
   MeghAIDatabase
 } from '@meghai/database';
@@ -9,10 +10,23 @@ import { PermissionBroker } from '@meghai/permissions';
 import { ToolRegistry } from '@meghai/tool-registry';
 import { ToolRuntime } from '@meghai/tool-runtime';
 import { ModelRouter } from '@meghai/model-router';
-import { MemoryManager } from '@meghai/memory';
+import { MemoryManager, ContextEngine } from '@meghai/memory';
 import { WindowsSystem } from '@meghai/windows';
-import { InputPipeline, DailyBriefService, RoutineEngine, ProactivityBudget } from '@meghai/ai-core';
-import { VoiceCatalog, VoiceSettingsManager, PersonalityStudio } from '@meghai/voice';
+import { InputPipeline, DailyBriefService, RoutineEngine, ProactivityBudget, MemoryCommandParser } from '@meghai/ai-core';
+import {
+  VoiceCatalog,
+  VoiceCatalogService,
+  VoiceSettingsManager,
+  PersonalityStudio,
+  WindowsSapiTTSProvider,
+  AudioPlaybackService,
+  AudioCaptureService,
+  AudioCueService,
+  SpeechRecognitionService,
+  VoiceInputManager,
+  AcousticWakeWordDetector,
+  WakeWordDetector
+} from '@meghai/voice';
 import { PersonalKnowledgeGraph } from '@meghai/knowledge-graph';
 import { IntegrationRegistry } from '@meghai/integrations';
 import { ObservabilityService } from '@meghai/observability';
@@ -22,8 +36,10 @@ import type {
   ToolCallRequest,
   ModelRequest,
   VoiceSettings,
+  AudioCueType,
   MemoryLayer,
-  TaskState
+  TaskState,
+  VoiceInputState
 } from '@meghai/shared-types';
 
 export class MeghAIServer {
@@ -34,8 +50,15 @@ export class MeghAIServer {
   public toolRuntime: ToolRuntime;
   public modelRouter: ModelRouter;
   public memoryManager: MemoryManager;
+  public contextEngine: ContextEngine;
   public voiceCatalog: VoiceCatalog;
+  public voiceCatalogService: VoiceCatalogService;
   public voiceSettings: VoiceSettingsManager;
+  public ttsProvider: WindowsSapiTTSProvider;
+  public audioPlayback: AudioPlaybackService;
+  public audioCapture: AudioCaptureService;
+  public speechRecognition: SpeechRecognitionService;
+  public voiceInput: VoiceInputManager;
   public routineEngine: RoutineEngine;
   public proactivityBudget: ProactivityBudget;
   public knowledgeGraph: PersonalKnowledgeGraph;
@@ -57,6 +80,40 @@ export class MeghAIServer {
     this.toolRuntime = new ToolRuntime(this.toolRegistry, this.permissionBroker);
     this.modelRouter = new ModelRouter();
     this.memoryManager = new MemoryManager(this.db);
+    this.contextEngine = new ContextEngine(this.memoryManager, this.permissionBroker);
+    this.ttsProvider = new WindowsSapiTTSProvider();
+    this.voiceCatalogService = new VoiceCatalogService();
+    this.audioPlayback = new AudioPlaybackService({ eventBus: this.eventBus });
+    this.audioCapture = new AudioCaptureService({
+      permissionBroker: this.permissionBroker,
+      eventBus: this.eventBus
+    });
+    this.speechRecognition = new SpeechRecognitionService();
+    this.voiceInput = new VoiceInputManager({
+      audioCapture: this.audioCapture,
+      audioOutput: this.audioPlayback,
+      speechRecognition: this.speechRecognition,
+      eventBus: this.eventBus,
+      onCommand: async (transcript) => {
+        this.eventBus.publish('VOICE_COMMAND_RECEIVED', { transcript });
+        await this.processUserRequest(transcript);
+      }
+    });
+
+    this.voiceInput.onStateChange((state) => {
+      if (state === 'WAKE_CONFIRMED' || state === 'COMMAND_CAPTURE') {
+        this.setAIState('LISTENING');
+      } else if (state === 'TRANSCRIBING') {
+        this.setAIState('UNDERSTANDING');
+      } else if (state === 'PROCESSING') {
+        this.setAIState('EXECUTING');
+      } else if (state === 'PASSIVE_WAKE_LISTENING') {
+        if (this.aiState !== 'SPEAKING') {
+          this.setAIState('READY');
+        }
+      }
+    });
+
     this.voiceCatalog = new VoiceCatalog();
     this.voiceSettings = new VoiceSettingsManager();
     this.routineEngine = new RoutineEngine();
@@ -64,6 +121,42 @@ export class MeghAIServer {
     this.knowledgeGraph = new PersonalKnowledgeGraph();
     this.integrationRegistry = new IntegrationRegistry(this.permissionBroker);
     this.observability = new ObservabilityService();
+
+    // Dynamically discover and populate real installed Windows voices across providers
+    this.voiceCatalogService.initialize().then(voices => {
+      if (voices.length > 0) {
+        const cur = this.voiceSettings.getSettings().selectedVoiceId;
+        if (!voices.some(v => v.id === cur)) {
+          const defaultVoice = voices.find(v => v.id === 'onecore-heera') || voices[0];
+          if (defaultVoice) {
+            this.voiceSettings.updateSettings({
+              selectedVoiceId: defaultVoice.id,
+              selectedProvider: defaultVoice.provider
+            });
+          }
+        }
+      }
+    }).catch(() => {});
+
+    // Reset AI state when audio playback finishes or stops
+    this.audioPlayback.onStop(() => {
+      if (this.aiState === 'SPEAKING') {
+        this.setAIState('READY');
+      }
+    });
+
+    // Wire KillSwitch to abort audio playback, cues, thinking loop, voice input, and microphone capture immediately
+    KillSwitch.onKill((reason) => {
+      this.audioPlayback.stop(reason);
+      this.voiceInput.stop(reason).catch(() => {});
+      this.eventBus.publish('INTERRUPTED', { reason: 'Emergency Kill Switch Activated' });
+      if (this.audioCapture.isCapturing()) {
+        this.audioCapture.stop(reason);
+      }
+    });
+
+    // Play pleasant startup audio chime asynchronously
+    this.audioPlayback.playCue('startup').catch(() => {});
 
     this.seedDefaultKnowledge();
     this.registerToolHandlers();
@@ -255,7 +348,11 @@ export class MeghAIServer {
               aiState: this.aiState,
               killSwitchActive: KillSwitch.isActive(),
               providers,
-              permissions: this.permissionBroker.listGrants()
+              permissions: this.permissionBroker.listGrants(),
+              microphone: {
+                state: this.audioCapture.getState(),
+                isCapturing: this.audioCapture.isCapturing()
+              }
             }));
             return;
           }
@@ -263,6 +360,14 @@ export class MeghAIServer {
           // Emergency Kill Switch: /api/v1/system/kill
           if (pathname === '/api/v1/system/kill' && req.method === 'POST') {
             const result = KillSwitch.stopMegh('User triggered emergency kill switch.');
+            if (this.audioPlayback.isPlaying()) {
+              this.audioPlayback.stop('Emergency Kill Switch triggered');
+              this.eventBus.publish('INTERRUPTED', { reason: 'Emergency Kill Switch triggered' });
+            }
+            if (this.audioCapture.isCapturing()) {
+              this.audioCapture.stop('Emergency Kill Switch triggered');
+            }
+            this.setAIState('CANCELLED');
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               success: true,
@@ -350,6 +455,18 @@ export class MeghAIServer {
               res.end(JSON.stringify(candidate));
               return;
             }
+            if (req.method === 'DELETE') {
+              const body = await this.readJsonBody(req) as { id: string };
+              try {
+                const deleted = await this.memoryManager.deleteMemory(body.id);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: deleted, id: body.id }));
+              } catch (err: any) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: err.message }));
+              }
+              return;
+            }
           }
 
           // Memory Candidate Promotion: /api/v1/memory/promote
@@ -394,9 +511,19 @@ export class MeghAIServer {
             const lang = url.searchParams.get('language') || undefined;
             const prov = url.searchParams.get('provider') || undefined;
             const gender = url.searchParams.get('gender') || undefined;
-            const voices = this.voiceCatalog.listVoices({ language: lang, provider: prov, gender });
+            const naturalness = url.searchParams.get('naturalness') || undefined;
+            const availableOnly = url.searchParams.get('availableOnly') === 'true';
+            const voices = this.voiceCatalogService.listVoices({ language: lang, provider: prov, gender, naturalness, availableOnly });
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(voices));
+            return;
+          }
+
+          // Voice Catalog Stats: /api/v1/voice/catalog/stats
+          if (pathname === '/api/v1/voice/catalog/stats' && req.method === 'GET') {
+            const stats = this.voiceCatalogService.getStats();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(stats));
             return;
           }
 
@@ -418,10 +545,225 @@ export class MeghAIServer {
 
           // Voice Preview: /api/v1/voice/preview
           if (pathname === '/api/v1/voice/preview' && req.method === 'POST') {
-            const body = await this.readJsonBody(req) as { voiceId: string; text?: string };
-            const preview = this.voiceSettings.previewVoice(body.voiceId, body.text);
+            const body = await this.readJsonBody(req) as { voiceId?: string; text?: string; play?: boolean };
+            const settings = this.voiceSettings.getSettings();
+            const voiceId = body.voiceId || settings.selectedVoiceId;
+            const textToSpeak = (body.text || 'Greetings. I am MeghAI, your personal intelligence layer.').trim();
+            const correlationId = `tts-preview-${Date.now()}`;
+
+            this.eventBus.publish('TTS_REQUESTED', {
+              voiceId,
+              text: textToSpeak
+            }, correlationId);
+
+            try {
+              const synthesis = await this.voiceCatalogService.synthesize(textToSpeak, {
+                voiceId,
+                speechRate: settings.speechRate,
+                pitch: settings.pitch,
+                volume: settings.volume
+              });
+
+              this.eventBus.publish('TTS_AUDIO_READY', {
+                voiceId: synthesis.voiceId,
+                durationMs: synthesis.durationMs,
+                format: synthesis.format
+              }, correlationId);
+
+              if (body.play !== false) {
+                this.setAIState('SPEAKING');
+                await this.audioPlayback.playTTS(synthesis, {
+                  voiceId: synthesis.voiceId,
+                  text: synthesis.spokenText,
+                  correlationId
+                });
+                this.setAIState('READY');
+              }
+
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                status: 'SYNTHESIZED_AND_PLAYED',
+                voiceId: synthesis.voiceId,
+                text: synthesis.spokenText,
+                speechRate: settings.speechRate,
+                pitch: settings.pitch,
+                volume: settings.volume,
+                durationMs: synthesis.durationMs,
+                audioBase64: synthesis.audioBase64
+              }));
+            } catch (err: any) {
+              if (this.aiState === 'SPEAKING') {
+                this.setAIState('READY');
+              }
+              this.eventBus.publish('TTS_FAILED', { error: err.message, voiceId }, correlationId);
+              this.eventBus.publish('VOICE_ERROR', { error: err.message }, correlationId);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+            return;
+          }
+
+          // Voice Speak (on-demand): /api/v1/voice/speak
+          if (pathname === '/api/v1/voice/speak' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { text: string; voiceId?: string };
+            const settings = this.voiceSettings.getSettings();
+            const voiceId = body.voiceId || settings.selectedVoiceId;
+            const textToSpeak = (body.text || '').trim();
+            if (!textToSpeak) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Text cannot be empty' }));
+              return;
+            }
+
+            try {
+              await this.speakResponse(textToSpeak);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true, spokenText: textToSpeak, voiceId }));
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+            return;
+          }
+
+          // Audio Cue Play: /api/v1/voice/cue
+          if (pathname === '/api/v1/voice/cue' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { cue: any };
+            const cueType = body.cue || 'startup';
+            try {
+              await this.audioPlayback.playCue(cueType);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true, cue: cueType }));
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+            return;
+          }
+
+          // Voice Stop: /api/v1/voice/stop
+          if (pathname === '/api/v1/voice/stop' && req.method === 'POST') {
+            const stopped = this.audioPlayback.stop('User requested voice stop');
+            if (stopped) {
+              this.eventBus.publish('INTERRUPTED', { reason: 'User requested voice stop' });
+            }
+            if (this.aiState === 'SPEAKING') {
+              this.setAIState('READY');
+            }
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(preview));
+            res.end(JSON.stringify({ success: true, stopped, aiState: this.aiState }));
+            return;
+          }
+
+          // Voice Status: /api/v1/voice/status
+          if (pathname === '/api/v1/voice/status' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(this.audioPlayback.getStatus()));
+            return;
+          }
+
+          // Microphone Start: /api/v1/voice/mic/start
+          if (pathname === '/api/v1/voice/mic/start' && req.method === 'POST') {
+            try {
+              let body: any = {};
+              try { body = await this.readJsonBody(req); } catch {}
+              await this.audioCapture.start({ deviceId: body?.deviceId });
+              await this.voiceInput.startPassiveListening();
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                success: true,
+                state: this.audioCapture.getState(),
+                voiceInputState: this.voiceInput.getState(),
+                isCapturing: this.audioCapture.isCapturing(),
+                diagnostics: this.audioCapture.getDiagnostics()
+              }));
+            } catch (err: any) {
+              const status = this.audioCapture.getState() === 'MIC_DEVICE_UNAVAILABLE' ? 503 : 500;
+              res.writeHead(status, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                error: err.message,
+                state: this.audioCapture.getState()
+              }));
+            }
+            return;
+          }
+
+          // Microphone Stop: /api/v1/voice/mic/stop
+          if (pathname === '/api/v1/voice/mic/stop' && req.method === 'POST') {
+            let body: any = {};
+            try { body = await this.readJsonBody(req); } catch {}
+            await this.voiceInput.stop(body?.reason || 'User requested microphone stop');
+            const stopped = await this.audioCapture.stop(body?.reason || 'User requested microphone stop');
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              stopped,
+              state: this.audioCapture.getState(),
+              voiceInputState: this.voiceInput.getState(),
+              isCapturing: this.audioCapture.isCapturing()
+            }));
+            return;
+          }
+
+          // Microphone Status & Diagnostics: /api/v1/voice/mic/status
+          if (pathname === '/api/v1/voice/mic/status' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              state: this.audioCapture.getState(),
+              voiceInputState: this.voiceInput.getState(),
+              isCapturing: this.audioCapture.isCapturing(),
+              diagnostics: this.audioCapture.getDiagnostics()
+            }));
+            return;
+          }
+
+          // Voice STT Transcribe Endpoint: /api/v1/voice/stt/transcribe
+          if (pathname === '/api/v1/voice/stt/transcribe' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { audioBase64?: string; culture?: string };
+            const pcmBuffer = body.audioBase64 ? Buffer.from(body.audioBase64, 'base64') : Buffer.alloc(0);
+            try {
+              const result = await this.speechRecognition.transcribe(pcmBuffer, { culture: body.culture });
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+            return;
+          }
+
+          // Voice Wake Word Test Endpoint: /api/v1/voice/wake/test
+          if (pathname === '/api/v1/voice/wake/test' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { phrase?: string; audioBase64?: string };
+            try {
+              let result: any;
+              if (body.audioBase64) {
+                const pcmBuffer = Buffer.from(body.audioBase64, 'base64');
+                const detector = new AcousticWakeWordDetector();
+                result = await detector.detectWakePhrase(pcmBuffer);
+              } else if (body.phrase) {
+                const textCheck = WakeWordDetector.isWakeTrigger(body.phrase);
+                result = { detected: textCheck.isTriggered, phrase: textCheck.isTriggered ? 'Hey Megh' : undefined, cleanedText: textCheck.cleanedText };
+              } else {
+                result = { detected: false, error: 'No audio or phrase provided' };
+              }
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+            return;
+          }
+
+          // Microphone Devices: /api/v1/voice/mic/devices
+          if (pathname === '/api/v1/voice/mic/devices' && req.method === 'GET') {
+            const devices = await this.audioCapture.listInputDevices();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              devices,
+              count: devices.length
+            }));
             return;
           }
 
@@ -531,6 +873,77 @@ export class MeghAIServer {
   }
 
   /**
+   * Real Natural Speech Output (Section 67, 68, 70)
+   * Synthesizes and speaks text directly via Windows default audio device.
+   */
+  public async speakResponse(text: string, correlationId?: string): Promise<void> {
+    const settings = this.voiceSettings.getSettings();
+    if (!text) return;
+
+    // Clean text for speech (strip markdown code blocks, bold, URLs, bullet points for cleaner speech)
+    const cleanSpeechText = text
+      .replace(/```[\s\S]*?```/g, ' Code snippet omitted. ')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/https?:\/\/\S+/g, 'link')
+      .trim();
+
+    if (!cleanSpeechText) return;
+
+    const ttsCorrId = correlationId || `tts-${Date.now()}`;
+    this.eventBus.publish('TTS_REQUESTED', {
+      voiceId: settings.selectedVoiceId,
+      text: cleanSpeechText
+    }, ttsCorrId);
+    this.eventBus.publish('TTS_STARTED', {
+      voiceId: settings.selectedVoiceId,
+      text: cleanSpeechText
+    }, ttsCorrId);
+
+    try {
+      // 1. Synthesize audio across providers (SAPI, OneCore, Google Cloud, ElevenLabs)
+      const synthesis = await this.voiceCatalogService.synthesize(cleanSpeechText, {
+        voiceId: settings.selectedVoiceId,
+        speechRate: settings.speechRate,
+        pitch: settings.pitch,
+        volume: settings.volume
+      });
+
+      this.eventBus.publish('TTS_AUDIO_READY', {
+        voiceId: synthesis.voiceId,
+        durationMs: synthesis.durationMs,
+        format: synthesis.format
+      }, ttsCorrId);
+
+      // 2. Play subtle answer-ready chime cue before spoken response
+      try {
+        await this.audioPlayback.playCue('answer_ready');
+      } catch {}
+
+      // 3. Play the synthesized speech through the default Windows audio output device
+      this.setAIState('SPEAKING');
+      await this.audioPlayback.playTTS(synthesis, {
+        voiceId: synthesis.voiceId,
+        text: cleanSpeechText,
+        correlationId: ttsCorrId
+      });
+
+      this.setAIState('READY');
+      this.eventBus.publish('TTS_COMPLETED', {
+        voiceId: synthesis.voiceId,
+        durationMs: synthesis.durationMs
+      }, ttsCorrId);
+    } catch (err: any) {
+      if (this.aiState === 'SPEAKING') {
+        this.setAIState('READY');
+      }
+      this.eventBus.publish('TTS_FAILED', { error: err.message, voiceId: settings.selectedVoiceId }, ttsCorrId);
+      this.eventBus.publish('VOICE_ERROR', { error: err.message }, ttsCorrId);
+    }
+  }
+
+  /**
    * Complete End-to-End Orchestrated Request Handler (Section 14 & 229)
    */
   public async processUserRequest(
@@ -606,6 +1019,9 @@ export class MeghAIServer {
       };
       this.setAIState('READY');
       this.eventBus.publish('TASK_COMPLETED', response, correlationId);
+      if (this.voiceSettings.getSettings().autoSpeak === 'ON') {
+        this.speakResponse(response.reply, correlationId).catch(() => {});
+      }
       return response;
     }
 
@@ -637,6 +1053,9 @@ export class MeghAIServer {
       };
       this.setAIState('READY');
       this.eventBus.publish('TASK_COMPLETED', response, correlationId);
+      if (this.voiceSettings.getSettings().autoSpeak === 'ON') {
+        this.speakResponse(response.reply, correlationId).catch(() => {});
+      }
       return response;
     }
 
@@ -709,13 +1128,198 @@ export class MeghAIServer {
       return response;
     }
 
-    // E. General Intelligence / Chat / Explanation -> Model Routing
+    // E. Natural-Language Memory Operations ("Remember that...", "Don't forget...", "Forget that...")
+    if (intent === 'MEMORY_OPERATION') {
+      this.setAIState('EXECUTING');
+      const parsedCmd = MemoryCommandParser.parse(pipeline.normalizedText);
+
+      // Emit MEMORY_COMMAND_DETECTED event with safe metadata
+      this.eventBus.publish('MEMORY_COMMAND_DETECTED', {
+        action: parsedCmd.action,
+        type: parsedCmd.type,
+        scope: parsedCmd.scope
+      }, correlationId);
+
+      if (parsedCmd.action === 'FORGET') {
+        try {
+          const result = await this.memoryManager.forgetMemory(parsedCmd.content);
+          if (result.success && result.memory) {
+            // Verify removal from persistent store
+            const stillInDb = await this.db.getMemory(result.memory.id);
+            if (stillInDb) {
+              throw new Error('Database removal could not be verified in persistent store.');
+            }
+
+            // Emit MEMORY_DELETED event with safe metadata
+            this.eventBus.publish('MEMORY_DELETED', {
+              memoryId: result.memory.id,
+              layer: result.memory.type
+            }, correlationId);
+
+            this.setAIState('RESPONDING');
+            const cleanTarget = result.memory.content.replace(/[.]+$/, '');
+            const reply = `I've forgotten: ${cleanTarget}.`;
+            const response = {
+              status: 'COMPLETED',
+              deletedMemory: result.memory,
+              reply,
+              verificationStatus: 'VERIFIED',
+              verificationDetails: 'Memory record removed and verified from persistent store.',
+              timelineCorrelationId: correlationId
+            };
+            this.setAIState('READY');
+            this.eventBus.publish('TASK_COMPLETED', response, correlationId);
+            return response;
+          } else {
+            this.setAIState('RESPONDING');
+            const reply = `I couldn't find a matching memory to forget for '${parsedCmd.content}'.`;
+            const response = {
+              status: 'COMPLETED',
+              reply,
+              verificationStatus: 'VERIFIED',
+              timelineCorrelationId: correlationId
+            };
+            this.setAIState('READY');
+            this.eventBus.publish('TASK_COMPLETED', response, correlationId);
+            return response;
+          }
+        } catch (err: any) {
+          this.setAIState('READY');
+          this.eventBus.publish('TASK_FAILED', {
+            status: 'FAILED',
+            error: err.message
+          }, correlationId);
+          const isLocked = err.message && err.message.toLowerCase().includes('locked');
+          const reply = isLocked
+            ? `Cannot delete memory: It is locked by user policy. Please unlock it in Memory Center first.`
+            : `Could not delete memory: ${err.message}`;
+          return {
+            status: 'FAILED',
+            error: err.message,
+            reply,
+            verificationStatus: 'FAILED',
+            timelineCorrelationId: correlationId
+          };
+        }
+      }
+
+      // STORE OPERATION
+      const now = new Date().toISOString();
+      const memEntry: any = {
+        id: `mem-${crypto.randomUUID()}`,
+        userId: 'default-user',
+        type: parsedCmd.type,
+        layer: parsedCmd.type,
+        content: parsedCmd.content,
+        source: parsedCmd.source,
+        importance: 1,
+        entities: [],
+        tags: [parsedCmd.type.toLowerCase()],
+        confidence: parsedCmd.confidence,
+        sensitivity: parsedCmd.sensitivity,
+        lifecycle: 'DURABLE',
+        provenance: 'User Natural Command',
+        accessCount: 0,
+        createdAt: now,
+        updatedAt: now,
+        userApproved: true,
+        locked: false,
+        pinned: false
+      };
+
+      try {
+        await this.db.createMemory(memEntry);
+
+        // Verification Gate: Verify record actually exists in persistent database
+        const verified = await this.db.getMemory(memEntry.id);
+        if (!verified) {
+          throw new Error('Database write could not be verified in persistent store.');
+        }
+
+        // Emit MEMORY_STORED event with safe telemetry metadata
+        this.eventBus.publish('MEMORY_STORED', {
+          memoryId: verified.id,
+          layer: verified.type,
+          sensitivity: verified.sensitivity,
+          confidence: verified.confidence,
+          content: (verified.sensitivity === 'CONFIDENTIAL' || verified.sensitivity === 'RESTRICTED') ? '[REDACTED]' : verified.content
+        }, correlationId);
+
+        this.setAIState('RESPONDING');
+        let phrase = parsedCmd.content.replace(/[.]+$/, '');
+        if (/^my\s+/i.test(phrase)) {
+          phrase = phrase.replace(/^my\s+/i, 'your ');
+        } else if (/^i\s+/i.test(phrase)) {
+          phrase = phrase.replace(/^i\s+/i, 'you ');
+        }
+        if (phrase.length > 0) {
+          phrase = phrase.charAt(0).toLowerCase() + phrase.slice(1);
+        }
+        const reply = `Got it. I've saved that ${phrase}.`;
+
+        const response = {
+          status: 'COMPLETED',
+          memory: verified,
+          reply,
+          verificationStatus: 'VERIFIED',
+          verificationDetails: 'Memory record verified in persistent database store.',
+          timelineCorrelationId: correlationId
+        };
+        this.setAIState('READY');
+        this.eventBus.publish('TASK_COMPLETED', response, correlationId);
+        if (this.voiceSettings.getSettings().autoSpeak === 'ON') {
+          this.speakResponse(response.reply, correlationId).catch(() => {});
+        }
+        return response;
+      } catch (err: any) {
+        this.setAIState('READY');
+        this.eventBus.publish('TASK_FAILED', {
+          status: 'FAILED',
+          error: err.message
+        }, correlationId);
+        return {
+          status: 'FAILED',
+          error: err.message,
+          reply: `I couldn't save that memory because the memory service failed.`,
+          verificationStatus: 'FAILED',
+          timelineCorrelationId: correlationId
+        };
+      }
+    }
+
+    // F. General Intelligence / Chat / Explanation -> Context Engine & Model Routing
     this.setAIState('ROUTING');
+
+    // Context Engine Memory Retrieval
+    const assembledContext = await this.contextEngine.assembleContext({
+      query: pipeline.normalizedText
+    });
+
+    if (assembledContext.recalledMemories.length > 0) {
+      this.eventBus.publish('MEMORY_RETRIEVED', {
+        count: assembledContext.recalledMemories.length,
+        memoryTypes: assembledContext.recalledMemories.map(m => m.layer),
+        relevanceMetadata: {
+          confidenceScores: assembledContext.recalledMemories.map(m => m.confidence)
+        },
+        correlationId
+      }, correlationId);
+    }
+
+    const systemPrompt = assembledContext.formattedMemoryContext
+      ? `You are MeghAI, the user's personal AI operating assistant. You have access to verified persistent user memories:\n\n${assembledContext.formattedMemoryContext}\n\nAnswer the user's question directly using these memories when relevant.`
+      : undefined;
+
     const modelReq: ModelRequest = {
-      messages: [{ role: 'user', content: pipeline.normalizedText }]
+      messages: [
+        ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+        { role: 'user' as const, content: pipeline.normalizedText }
+      ]
     };
     const routeDecision = await this.modelRouter.route(modelReq);
     this.eventBus.publish('MODEL_SELECTED', routeDecision, correlationId);
+
+    modelReq.modelId = routeDecision.selectedModel;
 
     const provider = this.modelRouter.getProvider(routeDecision.selectedProvider);
     if (!provider || !provider.isConfigured()) {
@@ -728,11 +1332,29 @@ export class MeghAIServer {
       };
     }
 
+    this.eventBus.publish('MODEL_STARTED', {
+      provider: routeDecision.selectedProvider,
+      model: routeDecision.selectedModel,
+      correlationId
+    }, correlationId);
+
+    // Start non-blocking procedural thinking audio loop while model is thinking
+    this.audioPlayback.startThinkingLoop();
+
     this.setAIState('RESPONDING');
     try {
       const modelRes = await provider.complete(modelReq);
-      this.setAIState('READY');
-      return {
+      // Immediately stop thinking loop once model response arrives
+      this.audioPlayback.stopThinkingLoop();
+
+      this.eventBus.publish('MODEL_COMPLETED', {
+        provider: modelRes.providerId,
+        model: modelRes.modelId,
+        tokensUsed: modelRes.tokensUsed,
+        latencyMs: modelRes.latencyMs
+      }, correlationId);
+
+      const response = {
         status: 'COMPLETED',
         reply: modelRes.content,
         provider: modelRes.providerId,
@@ -740,11 +1362,27 @@ export class MeghAIServer {
         tokensUsed: modelRes.tokensUsed,
         timelineCorrelationId: correlationId
       };
-    } catch (err) {
       this.setAIState('READY');
+      this.eventBus.publish('TASK_COMPLETED', response, correlationId);
+      if (this.voiceSettings.getSettings().autoSpeak === 'ON') {
+        this.speakResponse(response.reply, correlationId).catch(err => {
+          console.error('[MeghAI Voice] Spoken response error:', err);
+        });
+      }
+      return response;
+    } catch (err) {
+      this.audioPlayback.stopThinkingLoop();
+      this.setAIState('READY');
+      this.eventBus.publish('TASK_FAILED', {
+        status: 'FAILED',
+        error: (err as Error).message,
+        provider: routeDecision.selectedProvider,
+        model: routeDecision.selectedModel
+      }, correlationId);
       return {
         status: 'FAILED',
         error: (err as Error).message,
+        reply: `Error communicating with model provider (${routeDecision.selectedProvider}): ${(err as Error).message}`,
         timelineCorrelationId: correlationId
       };
     }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import type { AIState, MeghAIEvent } from '@meghai/shared-types';
+import type { AIState, MeghAIEvent, MicrophoneState, VoiceInputState } from '@meghai/shared-types';
 import { AICore } from './components/AICore.js';
 import { TopHUD } from './components/TopHUD.js';
 import { ActionTimeline } from './components/ActionTimeline.js';
@@ -35,8 +35,12 @@ export type ActiveTab =
 
 export const App: React.FC = () => {
   const [aiState, setAiState] = useState<AIState>('READY');
-  const [micStatus, setMicStatus] = useState<'READY' | 'LISTENING' | 'OFF'>('READY');
+  const [micState, setMicState] = useState<MicrophoneState>('MIC_OFF');
+  const [voiceInputState, setVoiceInputState] = useState<VoiceInputState>('IDLE');
+  const [micLevel, setMicLevel] = useState<number>(0);
   const [isLocalMode, setIsLocalMode] = useState<boolean>(true);
+  const [autoSpeak, setAutoSpeak] = useState<'OFF' | 'ON' | 'ASK'>('ON');
+  const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [events, setEvents] = useState<MeghAIEvent[]>([]);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -78,7 +82,66 @@ export const App: React.FC = () => {
           if (payload?.state) setAiState(payload.state);
         }
         if ('id' in evt) {
-          setEvents(prev => [evt as MeghAIEvent, ...prev.slice(0, 99)]);
+          const mEvt = evt as MeghAIEvent;
+          setEvents(prev => [mEvt, ...prev.slice(0, 99)]);
+
+          // Handle real native microphone and voice events
+          if (mEvt.type === 'MIC_STARTING') {
+            setMicState('MIC_STARTING');
+          } else if (mEvt.type === 'MIC_LISTENING') {
+            setMicState('MIC_LISTENING');
+          } else if (mEvt.type === 'MIC_LEVEL') {
+            const payload = mEvt.payload as { normalizedLevel?: number; rms?: number; peak?: number };
+            setMicLevel(payload?.normalizedLevel ?? 0);
+          } else if (mEvt.type === 'MIC_STOPPING') {
+            setMicState('MIC_STOPPING');
+            setVoiceInputState('IDLE');
+          } else if (mEvt.type === 'MIC_OFF') {
+            setMicState('MIC_OFF');
+            setVoiceInputState('IDLE');
+            setMicLevel(0);
+            setAiState(prev => prev === 'LISTENING' ? 'READY' : prev);
+          } else if (mEvt.type === 'MIC_DEVICE_UNAVAILABLE') {
+            setMicState('MIC_DEVICE_UNAVAILABLE');
+            setVoiceInputState('IDLE');
+            setMicLevel(0);
+          } else if (mEvt.type === 'VOICE_INPUT_STATE_CHANGED') {
+            const payload = mEvt.payload as { state: VoiceInputState };
+            if (payload?.state) {
+              setVoiceInputState(payload.state);
+            }
+          } else if (mEvt.type === 'TRANSCRIPT_FINAL') {
+            const payload = mEvt.payload as { text: string };
+            if (payload?.text) {
+              setMessages(prev => [
+                ...prev,
+                {
+                  id: `usr-voice-${Date.now()}`,
+                  sender: 'user',
+                  text: `🎙️ ${payload.text}`,
+                  timestamp: new Date().toLocaleTimeString()
+                }
+              ]);
+            }
+          } else if (mEvt.type === 'TASK_COMPLETED') {
+            const payload = mEvt.payload as { reply?: string; verificationStatus?: any; verificationDetails?: string };
+            if (payload?.reply) {
+              setMessages(prev => {
+                if (prev.some(m => m.text === payload.reply)) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: `megh-resp-${Date.now()}`,
+                    sender: 'megh',
+                    text: payload.reply!,
+                    verificationStatus: payload.verificationStatus,
+                    verificationDetails: payload.verificationDetails,
+                    timestamp: new Date().toLocaleTimeString()
+                  }
+                ];
+              });
+            }
+          }
         }
       } catch {
         // Ignore parse error
@@ -96,10 +159,66 @@ export const App: React.FC = () => {
       })
       .catch(() => setIsLocalMode(true));
 
+    // Check initial microphone status
+    fetch('/api/v1/voice/mic/status')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.state) {
+          setMicState(data.state);
+        }
+        if (data?.voiceInputState) {
+          setVoiceInputState(data.voiceInputState);
+        }
+      })
+      .catch(() => {});
+
+    // Check voice settings (including persistent autoSpeak mode)
+    fetch('/api/v1/voice/settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.autoSpeak) {
+          setAutoSpeak(data.autoSpeak);
+        }
+      })
+      .catch(() => {});
+
     return () => {
       eventSource.close();
     };
   }, []);
+
+  const handleToggleAutoSpeak = async () => {
+    const nextMode: 'OFF' | 'ON' | 'ASK' = autoSpeak === 'ON' ? 'OFF' : 'ON';
+    setAutoSpeak(nextMode);
+    try {
+      await fetch('/api/v1/voice/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ autoSpeak: nextMode })
+      });
+    } catch {}
+  };
+
+  const handleSpeakMessage = async (msgId: string, text: string) => {
+    if (speakingMsgId === msgId) {
+      try {
+        await fetch('/api/v1/voice/stop', { method: 'POST' });
+      } catch {}
+      setSpeakingMsgId(null);
+      return;
+    }
+
+    setSpeakingMsgId(msgId);
+    try {
+      await fetch('/api/v1/voice/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+    } catch {} finally {
+      setSpeakingMsgId(null);
+    }
+  };
 
   const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
@@ -148,20 +267,41 @@ export const App: React.FC = () => {
     try {
       await fetch('/api/v1/system/kill', { method: 'POST' });
       setAiState('CANCELLED');
+      setMicState('MIC_OFF');
+      setMicLevel(0);
+      setSpeakingMsgId(null);
     } catch {
       // Fallback
     }
   };
 
-  const handleToggleMic = () => {
-    if (micStatus === 'OFF') {
-      setMicStatus('READY');
-    } else if (micStatus === 'READY') {
-      setMicStatus('LISTENING');
-      setAiState('LISTENING');
+  const handleToggleMic = async () => {
+    if (micState === 'MIC_LISTENING' || micState === 'MIC_STARTING') {
+      setMicState('MIC_STOPPING');
+      try {
+        const res = await fetch('/api/v1/voice/mic/stop', { method: 'POST' });
+        const data = await res.json();
+        setMicState(data.state || 'MIC_OFF');
+        setMicLevel(0);
+        if (aiState === 'LISTENING') setAiState('READY');
+      } catch {
+        setMicState('MIC_OFF');
+        setMicLevel(0);
+      }
     } else {
-      setMicStatus('OFF');
-      setAiState('READY');
+      setMicState('MIC_STARTING');
+      try {
+        const res = await fetch('/api/v1/voice/mic/start', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          setMicState(data.state || 'MIC_LISTENING');
+          setAiState('LISTENING');
+        } else {
+          setMicState(data.state || 'MIC_ERROR');
+        }
+      } catch {
+        setMicState('MIC_ERROR');
+      }
     }
   };
 
@@ -170,8 +310,12 @@ export const App: React.FC = () => {
       {/* Top HUD */}
       <TopHUD
         aiState={aiState}
-        micStatus={micStatus}
+        micState={micState}
+        voiceInputState={voiceInputState}
+        micLevel={micLevel}
         isLocalMode={isLocalMode}
+        autoSpeak={autoSpeak}
+        onToggleAutoSpeak={handleToggleAutoSpeak}
         onEmergencyStop={handleEmergencyStop}
         onToggleMic={handleToggleMic}
       />
@@ -283,6 +427,32 @@ export const App: React.FC = () => {
                         {msg.verificationDetails && (
                           <span style={{ color: '#64748b' }}>• {msg.verificationDetails}</span>
                         )}
+                      </div>
+                    )}
+
+                    {/* On-Demand Audio Spoken Output (Listen Button) */}
+                    {msg.sender === 'megh' && (
+                      <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                        <button
+                          onClick={() => handleSpeakMessage(msg.id, msg.text)}
+                          style={{
+                            background: speakingMsgId === msg.id ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                            border: `1px solid ${speakingMsgId === msg.id ? '#ef4444' : 'rgba(255, 255, 255, 0.1)'}`,
+                            color: speakingMsgId === msg.id ? '#fca5a5' : '#38bdf8',
+                            borderRadius: '6px',
+                            padding: '3px 8px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            transition: 'all 0.15s ease'
+                          }}
+                          title={speakingMsgId === msg.id ? 'Stop audio' : 'Speak this response on Windows speakers'}
+                        >
+                          <span>{speakingMsgId === msg.id ? '■ Stop' : '🔊 Listen'}</span>
+                        </button>
                       </div>
                     )}
                   </div>
