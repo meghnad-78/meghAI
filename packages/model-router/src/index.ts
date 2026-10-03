@@ -9,13 +9,49 @@ import type {
   PrivacyMode
 } from '@meghai/shared-types';
 
+export type {
+  ModelProviderId,
+  ModelDescriptor,
+  ModelRequest,
+  ModelResponse,
+  ModelMessage,
+  RoutingMode,
+  CostMode,
+  PrivacyMode
+};
+import { isTestOrDummyCredential } from '@meghai/config';
+
 export type TaskComplexity = 'FAST' | 'NORMAL' | 'DEEP' | 'MULTI_MODEL';
+
+export type ProviderHealthStatus =
+  | 'CONFIGURED_HEALTHY'
+  | 'AUTHENTICATION_FAILED'
+  | 'RATE_LIMITED'
+  | 'PROVIDER_UNREACHABLE'
+  | 'NO_CREDENTIAL';
+
+export function normalizeProviderId(id?: string): ModelProviderId | 'auto' | undefined {
+  if (!id) return undefined;
+  const clean = id.trim().toLowerCase();
+  if (clean === 'auto') return 'auto';
+  if (clean === 'ollama' || clean === 'local' || clean === 'localollama' || clean === 'local-ollama' || clean === 'local-ollama-model') {
+    return 'local-ollama';
+  }
+  if (clean === 'gemini' || clean === 'google') return 'gemini';
+  if (clean === 'openai') return 'openai';
+  if (clean === 'anthropic' || clean === 'claude') return 'anthropic';
+  if (clean === 'deepseek') return 'deepseek';
+  if (clean === 'perplexity') return 'perplexity';
+  if (clean === 'grok' || clean === 'xai') return 'grok';
+  return clean as ModelProviderId;
+}
 
 export interface ProviderHealth {
   available: boolean;
   latencyMs: number;
   message?: string;
   isConfigured: boolean;
+  status?: ProviderHealthStatus;
 }
 
 export interface IModelProvider {
@@ -25,6 +61,8 @@ export interface IModelProvider {
   getModels(): ModelDescriptor[];
   checkHealth(): Promise<ProviderHealth>;
   complete(request: ModelRequest): Promise<ModelResponse>;
+  setApiKey?(key: string): void;
+  getApiKey?(): string | undefined;
 }
 
 export interface RoutingDecision {
@@ -75,7 +113,20 @@ export abstract class BaseProvider implements IModelProvider {
   ) {}
 
   public isConfigured(): boolean {
-    return Boolean(this.apiKey && this.apiKey.trim().length > 0);
+    const key = this.getApiKey();
+    if (!key || key.trim().length === 0) return false;
+    if (process.env['NODE_ENV'] !== 'test' && isTestOrDummyCredential(key)) {
+      return false;
+    }
+    return true;
+  }
+
+  public setApiKey(key: string): void {
+    this.apiKey = key.trim();
+  }
+
+  public getApiKey(): string | undefined {
+    return this.apiKey;
   }
 
   public abstract getModels(): ModelDescriptor[];
@@ -87,16 +138,47 @@ export abstract class BaseProvider implements IModelProvider {
  * Google Gemini Provider Adapter
  */
 export class GeminiProvider extends BaseProvider {
-  constructor(apiKey = process.env['GEMINI_API_KEY']) {
+  constructor(apiKey?: string) {
     super('gemini', 'Google Gemini', apiKey);
+  }
+
+  public override getApiKey(): string | undefined {
+    // 1. Explicit in-memory key (set via constructor or setApiKey)
+    if (this.apiKey && this.apiKey.trim().length > 0) {
+      return this.apiKey.trim();
+    }
+
+    // 2. Precedence rule: GOOGLE_API_KEY takes precedence over GEMINI_API_KEY
+    const googleKey = process.env['GOOGLE_API_KEY']?.trim();
+    if (googleKey) return googleKey;
+
+    const geminiKey = process.env['GEMINI_API_KEY']?.trim();
+    if (geminiKey) return geminiKey;
+
+    return undefined;
+  }
+
+  public override setApiKey(key: string): void {
+    const trimmed = key.trim();
+    this.apiKey = trimmed;
+    process.env['GEMINI_API_KEY'] = trimmed;
+  }
+
+  public override isConfigured(): boolean {
+    const key = this.getApiKey();
+    if (!key || key.trim().length === 0) return false;
+    if (process.env['NODE_ENV'] !== 'test' && isTestOrDummyCredential(key)) {
+      return false;
+    }
+    return true;
   }
 
   public getModels(): ModelDescriptor[] {
     return [
       {
-        id: 'gemini-2.5-flash',
+        id: 'gemini-3.8-flash',
         providerId: 'gemini',
-        name: 'Gemini 2.5 Flash',
+        name: 'Gemini 3.8 Flash',
         isLocal: false,
         costPer1kInputTokensUSD: 0.000075,
         costPer1kOutputTokensUSD: 0.0003,
@@ -116,9 +198,31 @@ export class GeminiProvider extends BaseProvider {
         }
       },
       {
-        id: 'gemini-2.5-pro',
+        id: 'gemini-flash-latest',
         providerId: 'gemini',
-        name: 'Gemini 2.5 Pro',
+        name: 'Gemini Flash Latest',
+        isLocal: false,
+        costPer1kInputTokensUSD: 0.000075,
+        costPer1kOutputTokensUSD: 0.0003,
+        capabilities: {
+          supportsText: true,
+          supportsVision: true,
+          supportsAudio: true,
+          supportsFiles: true,
+          supportsLongContext: true,
+          supportsToolCalling: true,
+          supportsStructuredOutput: true,
+          supportsStreaming: true,
+          supportsReasoning: true,
+          supportsWebSearch: true,
+          supportsEmbeddings: true,
+          maxContextTokens: 1048576
+        }
+      },
+      {
+        id: 'gemini-3.1-pro-preview',
+        providerId: 'gemini',
+        name: 'Gemini 3.1 Pro Preview',
         isLocal: false,
         costPer1kInputTokensUSD: 0.00125,
         costPer1kOutputTokensUSD: 0.005,
@@ -141,55 +245,188 @@ export class GeminiProvider extends BaseProvider {
   }
 
   public async checkHealth(): Promise<ProviderHealth> {
-    if (!this.isConfigured()) {
-      return { available: false, latencyMs: 0, isConfigured: false, message: 'GEMINI_API_KEY not configured.' };
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
+      return {
+        available: false,
+        latencyMs: 0,
+        isConfigured: false,
+        status: 'NO_CREDENTIAL',
+        message: 'Gemini API key is not configured.'
+      };
     }
-    return { available: true, latencyMs: 95, isConfigured: true };
+
+    if (process.env['NODE_ENV'] !== 'test' && isTestOrDummyCredential(apiKey)) {
+      return {
+        available: false,
+        latencyMs: 0,
+        isConfigured: false,
+        status: 'NO_CREDENTIAL',
+        message: 'Test/dummy fixture key ignored in production.'
+      };
+    }
+
+    const startTime = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    try {
+      // Lightweight verification: list models endpoint (zero token generation cost)
+      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      const latencyMs = Math.max(1, Date.now() - startTime);
+
+      if (res.ok) {
+        return {
+          available: true,
+          latencyMs,
+          isConfigured: true,
+          status: 'CONFIGURED_HEALTHY',
+          message: 'Gemini API connection healthy.'
+        };
+      }
+
+      const errText = await res.text().catch(() => '');
+      let errMessage = '';
+      try {
+        const json = JSON.parse(errText);
+        errMessage = json.error?.message || errText;
+      } catch {
+        errMessage = errText;
+      }
+
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        return {
+          available: false,
+          latencyMs,
+          isConfigured: true,
+          status: 'AUTHENTICATION_FAILED',
+          message: `Authentication failed (${res.status}): ${errMessage || 'Invalid API key or insufficient permissions.'}`
+        };
+      }
+
+      if (res.status === 429) {
+        return {
+          available: false,
+          latencyMs,
+          isConfigured: true,
+          status: 'RATE_LIMITED',
+          message: `Rate limit exceeded (429): ${errMessage || 'Quota exceeded.'}`
+        };
+      }
+
+      return {
+        available: false,
+        latencyMs,
+        isConfigured: true,
+        status: 'PROVIDER_UNREACHABLE',
+        message: `Gemini API returned HTTP ${res.status}: ${errMessage}`
+      };
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      const isAbort = controller.signal.aborted;
+      return {
+        available: false,
+        latencyMs: Math.max(1, Date.now() - startTime),
+        isConfigured: true,
+        status: 'PROVIDER_UNREACHABLE',
+        message: isAbort ? 'Gemini API connection timed out after 5000ms' : `Gemini API unreachable: ${err.message}`
+      };
+    }
   }
 
   public async complete(request: ModelRequest): Promise<ModelResponse> {
-    if (!this.isConfigured()) {
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
       throw new Error('Gemini API key is not configured.');
     }
     const startTime = Date.now();
-    const model = request.modelId || 'gemini-2.5-flash';
-
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
-      const contents = request.messages.map((m: ModelMessage) => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }]
-      }));
-
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents })
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Gemini API error (${res.status}): ${errText}`);
-      }
-
-      const json = await res.json() as any;
-      const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-      return {
-        content: text,
-        providerId: 'gemini',
-        modelId: model,
-        tokensUsed: {
-          promptTokens: json.usageMetadata?.promptTokenCount || 0,
-          completionTokens: json.usageMetadata?.candidatesTokenCount || 0,
-          totalTokens: json.usageMetadata?.totalTokenCount || 0
-        },
-        latencyMs: Date.now() - startTime,
-        finishReason: 'stop'
-      };
-    } catch (err) {
-      throw new Error(`Gemini completion failed: ${(err as Error).message}`);
+    const requestedModel = request.modelId || 'gemini-3.8-flash';
+    const modelsToTry = [requestedModel];
+    if (requestedModel === 'gemini-3.8-flash') {
+      modelsToTry.push('gemini-flash-latest');
+    } else if (requestedModel === 'gemini-flash-latest') {
+      modelsToTry.push('gemini-3.8-flash');
     }
+
+    const systemMessage = request.messages.find(m => m.role === 'system');
+    const nonSystemMessages = request.messages.filter(m => m.role !== 'system');
+    const messagesToFormat = nonSystemMessages.length > 0 ? nonSystemMessages : request.messages;
+
+    const contents = messagesToFormat.map((m: ModelMessage) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
+
+    const payload: Record<string, any> = { contents };
+    if (systemMessage && systemMessage.content.trim()) {
+      payload['systemInstruction'] = {
+        parts: [{ text: systemMessage.content.trim() }]
+      };
+    }
+
+    let lastErr: Error | null = null;
+    for (const model of modelsToTry) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          if (res.status === 429) {
+            let detail = 'Quota exceeded or rate limited.';
+            try {
+              const j = JSON.parse(errText);
+              if (j.error?.message) detail = j.error.message;
+            } catch {}
+            const rateErr = new Error(`Gemini rate limit or quota exceeded (HTTP 429): ${detail}`);
+            (rateErr as any).isRateLimit = true;
+            (rateErr as any).status = 429;
+            throw rateErr;
+          }
+          throw new Error(`Gemini API error (${res.status}): ${errText}`);
+        }
+
+        const json = await res.json() as any;
+        const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+        return {
+          content: text,
+          providerId: 'gemini',
+          modelId: model,
+          tokensUsed: {
+            promptTokens: json.usageMetadata?.promptTokenCount || 0,
+            completionTokens: json.usageMetadata?.candidatesTokenCount || 0,
+            totalTokens: json.usageMetadata?.totalTokenCount || 0
+          },
+          latencyMs: Date.now() - startTime,
+          finishReason: 'stop'
+        };
+      } catch (err: any) {
+        lastErr = err;
+        if (err.isRateLimit || err.status === 429) {
+          // Fail fast: do not attempt alternate Gemini models on account-level rate limit
+          break;
+        }
+      }
+    }
+
+    const finalErr = new Error(`Gemini completion failed: ${lastErr?.message || 'unknown error'}`);
+    if ((lastErr as any)?.isRateLimit) {
+      (finalErr as any).isRateLimit = true;
+      (finalErr as any).status = 429;
+    }
+    throw finalErr;
   }
 }
 
@@ -197,8 +434,33 @@ export class GeminiProvider extends BaseProvider {
  * OpenAI Provider Adapter
  */
 export class OpenAIProvider extends BaseProvider {
-  constructor(apiKey = process.env['OPENAI_API_KEY']) {
+  constructor(apiKey?: string) {
     super('openai', 'OpenAI', apiKey);
+  }
+
+  public override getApiKey(): string | undefined {
+    if (this.apiKey && this.apiKey.trim().length > 0) {
+      return this.apiKey.trim();
+    }
+    const envKey = process.env['OPENAI_API_KEY']?.trim();
+    if (envKey) return envKey;
+
+    return undefined;
+  }
+
+  public override setApiKey(key: string): void {
+    const trimmed = key.trim();
+    this.apiKey = trimmed;
+    process.env['OPENAI_API_KEY'] = trimmed;
+  }
+
+  public override isConfigured(): boolean {
+    const key = this.getApiKey();
+    if (!key || key.trim().length === 0) return false;
+    if (process.env['NODE_ENV'] !== 'test' && isTestOrDummyCredential(key)) {
+      return false;
+    }
+    return true;
   }
 
   public getModels(): ModelDescriptor[] {
@@ -251,14 +513,104 @@ export class OpenAIProvider extends BaseProvider {
   }
 
   public async checkHealth(): Promise<ProviderHealth> {
-    if (!this.isConfigured()) {
-      return { available: false, latencyMs: 0, isConfigured: false, message: 'OPENAI_API_KEY not configured.' };
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
+      return {
+        available: false,
+        latencyMs: 0,
+        isConfigured: false,
+        status: 'NO_CREDENTIAL',
+        message: 'OpenAI API key is not configured.'
+      };
     }
-    return { available: true, latencyMs: 110, isConfigured: true };
+
+    if (process.env['NODE_ENV'] !== 'test' && isTestOrDummyCredential(apiKey)) {
+      return {
+        available: false,
+        latencyMs: 0,
+        isConfigured: false,
+        status: 'NO_CREDENTIAL',
+        message: 'Test/dummy fixture key ignored in production.'
+      };
+    }
+
+    const startTime = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    try {
+      const res = await fetch('https://api.openai.com/v1/models', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`
+        },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      const latencyMs = Math.max(1, Date.now() - startTime);
+
+      if (res.ok) {
+        return {
+          available: true,
+          latencyMs,
+          isConfigured: true,
+          status: 'CONFIGURED_HEALTHY',
+          message: 'OpenAI API connection healthy.'
+        };
+      }
+
+      const errText = await res.text().catch(() => '');
+      let errMessage = '';
+      try {
+        const json = JSON.parse(errText);
+        errMessage = json.error?.message || errText;
+      } catch {
+        errMessage = errText;
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        return {
+          available: false,
+          latencyMs,
+          isConfigured: true,
+          status: 'AUTHENTICATION_FAILED',
+          message: `Authentication failed (${res.status}): ${errMessage || 'Invalid API key.'}`
+        };
+      }
+
+      if (res.status === 429) {
+        return {
+          available: false,
+          latencyMs,
+          isConfigured: true,
+          status: 'RATE_LIMITED',
+          message: `Rate limit or quota exceeded (429): ${errMessage}`
+        };
+      }
+
+      return {
+        available: false,
+        latencyMs,
+        isConfigured: true,
+        status: 'PROVIDER_UNREACHABLE',
+        message: `OpenAI API returned HTTP ${res.status}: ${errMessage}`
+      };
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      const isAbort = controller.signal.aborted;
+      return {
+        available: false,
+        latencyMs: Math.max(1, Date.now() - startTime),
+        isConfigured: true,
+        status: 'PROVIDER_UNREACHABLE',
+        message: isAbort ? 'OpenAI API connection timed out after 5000ms' : `OpenAI API unreachable: ${err.message}`
+      };
+    }
   }
 
   public async complete(request: ModelRequest): Promise<ModelResponse> {
-    if (!this.isConfigured()) {
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
       throw new Error('OpenAI API key is not configured.');
     }
     const startTime = Date.now();
@@ -269,7 +621,7 @@ export class OpenAIProvider extends BaseProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
           model,
@@ -304,8 +656,33 @@ export class OpenAIProvider extends BaseProvider {
  * Anthropic Claude Provider Adapter
  */
 export class AnthropicProvider extends BaseProvider {
-  constructor(apiKey = process.env['ANTHROPIC_API_KEY']) {
+  constructor(apiKey?: string) {
     super('anthropic', 'Anthropic Claude', apiKey);
+  }
+
+  public override getApiKey(): string | undefined {
+    if (this.apiKey && this.apiKey.trim().length > 0) {
+      return this.apiKey.trim();
+    }
+    const envKey = process.env['ANTHROPIC_API_KEY']?.trim();
+    if (envKey) return envKey;
+
+    return undefined;
+  }
+
+  public override setApiKey(key: string): void {
+    const trimmed = key.trim();
+    this.apiKey = trimmed;
+    process.env['ANTHROPIC_API_KEY'] = trimmed;
+  }
+
+  public override isConfigured(): boolean {
+    const key = this.getApiKey();
+    if (!key || key.trim().length === 0) return false;
+    if (process.env['NODE_ENV'] !== 'test' && isTestOrDummyCredential(key)) {
+      return false;
+    }
+    return true;
   }
 
   public getModels(): ModelDescriptor[] {
@@ -365,7 +742,8 @@ export class AnthropicProvider extends BaseProvider {
   }
 
   public async complete(request: ModelRequest): Promise<ModelResponse> {
-    if (!this.isConfigured()) {
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
       throw new Error('Anthropic API key is not configured.');
     }
     const startTime = Date.now();
@@ -376,7 +754,7 @@ export class AnthropicProvider extends BaseProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': this.apiKey!,
+          'x-api-key': apiKey,
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify({
@@ -413,8 +791,33 @@ export class AnthropicProvider extends BaseProvider {
  * DeepSeek Provider Adapter
  */
 export class DeepSeekProvider extends BaseProvider {
-  constructor(apiKey = process.env['DEEPSEEK_API_KEY']) {
+  constructor(apiKey?: string) {
     super('deepseek', 'DeepSeek', apiKey);
+  }
+
+  public override getApiKey(): string | undefined {
+    if (this.apiKey && this.apiKey.trim().length > 0) {
+      return this.apiKey.trim();
+    }
+    const envKey = process.env['DEEPSEEK_API_KEY']?.trim();
+    if (envKey) return envKey;
+
+    return undefined;
+  }
+
+  public override setApiKey(key: string): void {
+    const trimmed = key.trim();
+    this.apiKey = trimmed;
+    process.env['DEEPSEEK_API_KEY'] = trimmed;
+  }
+
+  public override isConfigured(): boolean {
+    const key = this.getApiKey();
+    if (!key || key.trim().length === 0) return false;
+    if (process.env['NODE_ENV'] !== 'test' && isTestOrDummyCredential(key)) {
+      return false;
+    }
+    return true;
   }
 
   public getModels(): ModelDescriptor[] {
@@ -474,7 +877,8 @@ export class DeepSeekProvider extends BaseProvider {
   }
 
   public async complete(request: ModelRequest): Promise<ModelResponse> {
-    if (!this.isConfigured()) {
+    const apiKey = this.getApiKey();
+    if (!apiKey) {
       throw new Error('DeepSeek API key is not configured.');
     }
     const startTime = Date.now();
@@ -485,7 +889,7 @@ export class DeepSeekProvider extends BaseProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
           model,
@@ -878,6 +1282,14 @@ export class ModelRouter {
     return this.executionEngine;
   }
 
+  public updateProviderKey(providerId: string, apiKey: string): void {
+    const canonicalId = providerId.toLowerCase() as ModelProviderId;
+    const provider = this.providers.get(canonicalId);
+    if (provider && typeof provider.setApiKey === 'function') {
+      provider.setApiKey(apiKey);
+    }
+  }
+
   /**
    * Evaluates request requirements and returns optimal routing decision.
    */
@@ -891,6 +1303,8 @@ export class ModelRouter {
       requiresLongContext?: boolean;
       requiresWebSearch?: boolean;
       requiresReasoning?: boolean;
+      allowOfflineFallback?: boolean;
+      allowExplicitFallback?: boolean;
     } = {}
   ): Promise<RoutingDecision> {
     const routingMode = options.routingMode || 'AUTO';
@@ -902,16 +1316,48 @@ export class ModelRouter {
     else if (routingMode === 'MULTI_MODEL') complexity = 'MULTI_MODEL';
     else if (options.requiresReasoning || options.requiresLongContext) complexity = 'DEEP';
 
-    const localModel = this.providers.get('local-ollama')?.getModels()[0]?.id || process.env['OLLAMA_MODEL'] || 'llama3.2:latest';
+    const localOllama = this.providers.get('local-ollama');
+    const localModel = localOllama?.getModels()[0]?.id || process.env['OLLAMA_MODEL'] || 'llama3.2:latest';
+
+    const canonicalReqProvider = normalizeProviderId(request.providerId);
 
     // 1. Explicit user override
-    if (request.providerId && this.providers.has(request.providerId)) {
-      const prov = this.providers.get(request.providerId)!;
+    if (canonicalReqProvider && canonicalReqProvider !== 'auto' && this.providers.has(canonicalReqProvider)) {
+      const prov = this.providers.get(canonicalReqProvider)!;
+      const isLocal = prov.id === 'local-ollama';
+
+      // Semantics: Explicit provider defaults to NO fallback unless explicitly enabled
+      const allowFallback = (options as any).allowExplicitFallback !== undefined
+        ? Boolean((options as any).allowExplicitFallback)
+        : ((request as any).allowExplicitFallback !== undefined
+            ? Boolean((request as any).allowExplicitFallback)
+            : !isLocal);
+
+      let fallbackChain: Array<{ providerId: ModelProviderId; modelId: string }> = [];
+      if (allowFallback) {
+        const otherOnline = Array.from(this.providers.values())
+          .filter(p => p.id !== prov.id && p.id !== 'local-ollama' && p.isConfigured())
+          .map(p => ({ providerId: p.id, modelId: p.getModels()[0]?.id || 'default' }));
+
+        fallbackChain = [...otherOnline];
+        if (options.allowOfflineFallback !== false && localOllama && localOllama.isConfigured()) {
+          fallbackChain.push({ providerId: 'local-ollama', modelId: localModel });
+        }
+      }
+
+      const provModels = prov.getModels();
+      const modelMatches = provModels.some(m => m.id === request.modelId);
+      const selectedModel = modelMatches
+        ? request.modelId!
+        : (prov.id === 'local-ollama'
+            ? (request.modelId || provModels[0]?.id || 'llama3.2:latest')
+            : (provModels[0]?.id || request.modelId || 'default'));
+
       return {
         selectedProvider: prov.id,
-        selectedModel: request.modelId || prov.getModels()[0]?.id || 'default',
+        selectedModel,
         routingReason: `User explicitly specified provider '${prov.name}'.`,
-        fallbackChain: [{ providerId: 'local-ollama', modelId: localModel }],
+        fallbackChain,
         executionMode: 'SINGLE_MODEL',
         complexity
       };
@@ -929,59 +1375,209 @@ export class ModelRouter {
       };
     }
 
-    // 3. Cloud Provider Selection with Graceful Fallback Chain
+    // 3. Intelligent Cloud Provider Selection
     const gemini = this.providers.get('gemini');
     const openai = this.providers.get('openai');
     const claude = this.providers.get('anthropic');
     const deepseek = this.providers.get('deepseek');
+    const grok = this.providers.get('grok');
+    const perplexity = this.providers.get('perplexity');
 
-    if (gemini && gemini.isConfigured()) {
-      const model = options.requiresVision || options.requiresLongContext ? 'gemini-2.5-pro' : 'gemini-2.5-flash';
+    const configuredOnline = [
+      gemini?.isConfigured() ? { p: gemini, defaultModel: 'gemini-3.8-flash' } : null,
+      openai?.isConfigured() ? { p: openai, defaultModel: 'gpt-4o-mini' } : null,
+      claude?.isConfigured() ? { p: claude, defaultModel: 'claude-3-5-haiku' } : null,
+      deepseek?.isConfigured() ? { p: deepseek, defaultModel: 'deepseek-chat' } : null,
+      grok?.isConfigured() ? { p: grok, defaultModel: 'grok-2' } : null,
+      perplexity?.isConfigured() ? { p: perplexity, defaultModel: 'sonar' } : null
+    ].filter(Boolean) as Array<{ p: IModelProvider; defaultModel: string }>;
+
+    if (configuredOnline.length > 0) {
+      let chosenProvider: IModelProvider;
+      let chosenModel: string;
+      let reason: string;
+
+      if (options.requiresWebSearch && (perplexity?.isConfigured() || grok?.isConfigured())) {
+        if (perplexity?.isConfigured()) {
+          chosenProvider = perplexity;
+          chosenModel = 'sonar';
+          reason = 'Auto-routed to Perplexity Sonar for online research and web citations.';
+        } else {
+          chosenProvider = grok!;
+          chosenModel = 'grok-2';
+          reason = 'Auto-routed to xAI Grok for real-time information retrieval.';
+        }
+      } else if (options.requiresReasoning && (deepseek?.isConfigured() || claude?.isConfigured())) {
+        if (deepseek?.isConfigured()) {
+          chosenProvider = deepseek;
+          chosenModel = 'deepseek-reasoner';
+          reason = 'Auto-routed to DeepSeek-R1 for complex multi-step reasoning.';
+        } else {
+          chosenProvider = claude!;
+          chosenModel = 'claude-3-5-sonnet';
+          reason = 'Auto-routed to Claude 3.5 Sonnet for advanced reasoning and analysis.';
+        }
+      } else if (options.requiresVision && (gemini?.isConfigured() || openai?.isConfigured())) {
+        if (gemini?.isConfigured()) {
+          chosenProvider = gemini;
+          chosenModel = options.requiresLongContext ? 'gemini-3.1-pro-preview' : 'gemini-3.8-flash';
+          reason = 'Auto-routed to Google Gemini for native multimodal image/document understanding.';
+        } else {
+          chosenProvider = openai!;
+          chosenModel = 'gpt-4o';
+          reason = 'Auto-routed to OpenAI GPT-4o Omni for visual analysis.';
+        }
+      } else if (routingMode === 'FAST') {
+        const fastChoice = gemini?.isConfigured() ? { p: gemini, m: 'gemini-3.8-flash' }
+          : openai?.isConfigured() ? { p: openai, m: 'gpt-4o-mini' }
+          : claude?.isConfigured() ? { p: claude, m: 'claude-3-5-haiku' }
+          : configuredOnline[0] ? { p: configuredOnline[0].p, m: configuredOnline[0].defaultModel } : null;
+
+        chosenProvider = fastChoice!.p;
+        chosenModel = fastChoice!.m;
+        reason = `Auto-routed to '${chosenProvider.name}' (${chosenModel}) for low-latency FAST execution.`;
+      } else {
+        // Balanced default
+        const primary = configuredOnline[0];
+        chosenProvider = primary.p;
+        chosenModel = primary.defaultModel;
+        reason = `Auto-routed to active configured provider '${chosenProvider.name}' (${chosenModel}).`;
+      }
+
+      // Build fallback chain of all other configured online providers
+      const fallbackChain: Array<{ providerId: ModelProviderId; modelId: string }> = configuredOnline
+        .filter(c => c.p.id !== chosenProvider.id)
+        .map(c => ({ providerId: c.p.id, modelId: c.defaultModel }));
+
       return {
-        selectedProvider: 'gemini',
-        selectedModel: model,
-        routingReason: 'Auto-selected Gemini: native multimodal & long context capability with low latency.',
-        fallbackChain: [
-          ...(openai && openai.isConfigured() ? [{ providerId: 'openai' as ModelProviderId, modelId: 'gpt-4o' }] : []),
-          ...(deepseek && deepseek.isConfigured() ? [{ providerId: 'deepseek' as ModelProviderId, modelId: 'deepseek-chat' }] : []),
-          { providerId: 'local-ollama' as ModelProviderId, modelId: localModel }
-        ],
+        selectedProvider: chosenProvider.id,
+        selectedModel: chosenModel,
+        routingReason: reason,
+        fallbackChain,
         executionMode: routingMode === 'MULTI_MODEL' ? 'MULTI_MODEL' : 'SINGLE_MODEL',
         complexity
       };
     }
 
-    if (openai && openai.isConfigured()) {
+    // 4. No online provider configured
+    const isTest = process.env['NODE_ENV'] === 'test';
+
+    if (isTest && localOllama && options.allowOfflineFallback !== false) {
       return {
-        selectedProvider: 'openai',
-        selectedModel: options.requiresVision ? 'gpt-4o' : 'gpt-4o-mini',
-        routingReason: 'Auto-selected OpenAI as active configured provider.',
-        fallbackChain: [{ providerId: 'local-ollama' as ModelProviderId, modelId: localModel }],
+        selectedProvider: 'local-ollama',
+        selectedModel: localModel,
+        routingReason: 'Test environment: running with mock/local provider.',
+        fallbackChain: [],
         executionMode: 'SINGLE_MODEL',
         complexity
       };
     }
 
-    if (claude && claude.isConfigured()) {
-      return {
-        selectedProvider: 'anthropic',
-        selectedModel: options.requiresReasoning ? 'claude-3-5-sonnet' : 'claude-3-5-haiku',
-        routingReason: 'Auto-selected Anthropic Claude as active configured provider.',
-        fallbackChain: [{ providerId: 'local-ollama' as ModelProviderId, modelId: localModel }],
-        executionMode: 'SINGLE_MODEL',
-        complexity
-      };
-    }
-
-    // 4. Default to Offline Local Mode ($0 / ₹0)
     return {
-      selectedProvider: 'local-ollama',
-      selectedModel: localModel,
-      routingReason: 'No cloud provider API keys configured. Running in Local Mode with zero cloud dependencies.',
-      fallbackChain: [],
+      selectedProvider: 'none' as any,
+      selectedModel: 'none',
+      routingReason: 'NO_ONLINE_MODEL_CONFIGURED: No online AI model provider is configured. Please add an API key for Google Gemini, OpenAI, Claude, or DeepSeek in Provider Center.',
+      fallbackChain: localOllama && localOllama.isConfigured() ? [{ providerId: 'local-ollama', modelId: localModel }] : [],
       executionMode: 'SINGLE_MODEL',
       complexity
     };
+  }
+
+  /**
+   * Executes completion with intelligent online failover across providers.
+   */
+  public async completeWithFallback(
+    request: ModelRequest,
+    options: {
+      routingMode?: RoutingMode;
+      costMode?: CostMode;
+      privacyMode?: PrivacyMode;
+      requiresVision?: boolean;
+      requiresLongContext?: boolean;
+      requiresWebSearch?: boolean;
+      requiresReasoning?: boolean;
+      allowOfflineFallback?: boolean;
+      allowExplicitFallback?: boolean;
+    } = {}
+  ): Promise<ModelResponse> {
+    const decision = await this.route(request, options);
+
+    if (decision.selectedProvider === ('none' as any)) {
+      // Check if fallbackChain has an emergency local option
+      if (decision.fallbackChain.length > 0) {
+        const fb = decision.fallbackChain[0];
+        const fbProv = this.getProvider(fb.providerId);
+        if (fbProv) {
+          const resp = await fbProv.complete({
+            ...request,
+            modelId: fb.modelId,
+            providerId: fb.providerId
+          });
+          return {
+            ...resp,
+            requestedProvider: request.providerId || 'auto',
+            requestedModel: request.modelId,
+            actualProvider: resp.providerId,
+            actualModel: resp.modelId,
+            fallbackOccurred: false
+          };
+        }
+      }
+      throw new Error('NO_ONLINE_MODEL_CONFIGURED: No online AI model provider is configured. Please enter your API key for Google Gemini, OpenAI, Anthropic Claude, or DeepSeek in Provider Center.');
+    }
+
+    const candidateIds = [
+      { providerId: decision.selectedProvider, modelId: decision.selectedModel },
+      ...decision.fallbackChain
+    ];
+
+    let lastError: Error | null = null;
+    let fallbackOccurred = false;
+    let fallbackReason: string | undefined;
+    const attemptErrors: Array<{ providerId: ModelProviderId; error: string }> = [];
+
+    for (let i = 0; i < candidateIds.length; i++) {
+      const candidate = candidateIds[i];
+      const provider = this.getProvider(candidate.providerId);
+      if (!provider) continue;
+
+      if (i > 0) {
+        fallbackOccurred = true;
+        fallbackReason = `Primary provider '${candidateIds[0].providerId}' failed (${attemptErrors[0]?.error || 'unknown error'}). Failing over to '${candidate.providerId}'.`;
+      }
+
+      try {
+        const response = await provider.complete({
+          ...request,
+          modelId: candidate.modelId,
+          providerId: candidate.providerId
+        });
+
+        return {
+          ...response,
+          requestedProvider: request.providerId || 'auto',
+          requestedModel: request.modelId,
+          actualProvider: response.providerId,
+          actualModel: response.modelId,
+          fallbackOccurred,
+          fallbackReason,
+          requestId: (request as any).id
+        };
+      } catch (err: any) {
+        lastError = err;
+        attemptErrors.push({ providerId: candidate.providerId, error: err.message });
+      }
+    }
+
+    if (attemptErrors.length > 1) {
+      const details = attemptErrors.map(e => `[${e.providerId}]: ${e.error}`).join('; ');
+      const aggregated = new Error(`All candidate providers failed: ${details}`);
+      (aggregated as any).attemptErrors = attemptErrors;
+      throw aggregated;
+    }
+
+    if (lastError) throw lastError;
+    throw new Error('NO_MODEL_RESPONSE: All model providers in fallback chain failed.');
   }
 
   private registerStandardProviders(): void {

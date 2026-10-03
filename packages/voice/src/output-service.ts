@@ -10,6 +10,7 @@ import type {
   TTSSynthesisResult
 } from '@meghai/shared-types';
 import { AudioCueService } from './cues.js';
+import { writePcmToWavBuffer } from './audio-preprocessor.js';
 
 export interface AudioOutputOptions {
   eventBus?: { publish: (type: any, payload: any, correlationId?: string) => void };
@@ -61,6 +62,17 @@ export class AudioOutputService {
     return this.state === 'PLAYING_TTS' || this.state === 'PLAYING_CUE';
   }
 
+  public isSpeakingTTS(): boolean {
+    return this.state === 'PLAYING_TTS';
+  }
+
+  public getCurrentSpeakingText(): string | null {
+    if (this.state === 'PLAYING_TTS' && this.currentMetadata?.text) {
+      return this.currentMetadata.text;
+    }
+    return null;
+  }
+
   public isThinkingLoopActive(): boolean {
     return this.thinkingLoopActive;
   }
@@ -83,7 +95,7 @@ export class AudioOutputService {
   public async playTTS(
     audioSource: string | Buffer | TTSSynthesisResult,
     metadata: { voiceId?: string; text?: string; correlationId?: string } = {}
-  ): Promise<void> {
+  ): Promise<{ success: boolean; durationMs: number }> {
     // 1. Stop any currently active cue or thinking loop
     if (this.thinkingLoopActive) {
       this.stopThinkingLoop();
@@ -118,9 +130,10 @@ export class AudioOutputService {
 
     this.activeFilePath = filePath;
     this.isTempPlaybackFile = tempFileCreated;
+    const playStartTime = Date.now();
     this.currentMetadata = {
       ...metadata,
-      startTime: Date.now()
+      startTime: playStartTime
     };
 
     this.setState('PLAYING_TTS');
@@ -140,6 +153,137 @@ export class AudioOutputService {
         voiceId: metadata.voiceId,
         text: metadata.text
       }, correlationId);
+      return {
+        success: true,
+        durationMs: Date.now() - playStartTime
+      };
+    } catch (err: any) {
+      this.setState('ERROR', err.message);
+      this.eventBus?.publish('AUDIO_PLAYBACK_FAILED', {
+        error: err.message,
+        voiceId: metadata.voiceId
+      }, correlationId);
+      throw err;
+    } finally {
+      this.cleanupPlaybackState();
+    }
+  }
+
+  /**
+   * Play streaming TTS chunks with low time-to-first-audio (Part 4)
+   */
+  public async playTTSStream(
+    stream: AsyncIterable<Buffer> | NodeJS.ReadableStream,
+    metadata: { voiceId?: string; text?: string; correlationId?: string; sampleRate?: number } = {}
+  ): Promise<{ success: boolean; durationMs: number; timeToFirstAudioMs: number }> {
+    if (this.thinkingLoopActive) {
+      this.stopThinkingLoop();
+    }
+    if (this.state !== 'IDLE') {
+      this.stop('Interrupting for new TTS streaming playback');
+    }
+
+    const correlationId = metadata.correlationId || `tts-stream-${Date.now()}`;
+    const startTime = Date.now();
+    let firstChunkReceived = false;
+    let timeToFirstAudio = 0;
+
+    const chunks: Buffer[] = [];
+    const sampleRate = metadata.sampleRate || 24000;
+
+    this.setState('PLAYING_TTS');
+    this.eventBus?.publish('AUDIO_STREAM_STARTED', {
+      voiceId: metadata.voiceId,
+      text: metadata.text
+    }, correlationId);
+
+    const tempFilePath = path.join(
+      os.tmpdir(),
+      `meghai-play-stream-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.wav`
+    );
+
+    try {
+      if (Symbol.asyncIterator in (stream as any)) {
+        for await (const chunk of stream as AsyncIterable<Buffer>) {
+          if (!firstChunkReceived) {
+            firstChunkReceived = true;
+            timeToFirstAudio = Date.now() - startTime;
+            this.eventBus?.publish('AUDIO_PLAYBACK_STARTED', {
+              voiceId: metadata.voiceId,
+              text: metadata.text,
+              timeToFirstAudio
+            }, correlationId);
+            this.eventBus?.publish('SPEAKING', {
+              voiceId: metadata.voiceId,
+              text: metadata.text,
+              timeToFirstAudio
+            }, correlationId);
+          }
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+      } else {
+        await new Promise<void>((resolve, reject) => {
+          const readable = stream as NodeJS.ReadableStream;
+          readable.on('data', (chunk: any) => {
+            if (!firstChunkReceived) {
+              firstChunkReceived = true;
+              timeToFirstAudio = Date.now() - startTime;
+              this.eventBus?.publish('AUDIO_PLAYBACK_STARTED', {
+                voiceId: metadata.voiceId,
+                text: metadata.text,
+                timeToFirstAudio
+              }, correlationId);
+              this.eventBus?.publish('SPEAKING', {
+                voiceId: metadata.voiceId,
+                text: metadata.text,
+                timeToFirstAudio
+              }, correlationId);
+            }
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          });
+          readable.on('end', () => resolve());
+          readable.on('error', err => reject(err));
+        });
+      }
+
+      const rawPcm = Buffer.concat(chunks);
+      if (rawPcm.length === 0) {
+        this.setState('IDLE');
+        return {
+          success: true,
+          durationMs: 0,
+          timeToFirstAudioMs: 0
+        };
+      }
+
+      const wavBuffer = writePcmToWavBuffer(rawPcm, sampleRate, 1);
+      await fsp.writeFile(tempFilePath, wavBuffer);
+
+      this.activeFilePath = tempFilePath;
+      this.isTempPlaybackFile = true;
+      this.currentMetadata = {
+        ...metadata,
+        startTime
+      };
+
+      await this.executeWindowsPlayback(tempFilePath);
+      this.setState('IDLE');
+      this.eventBus?.publish('AUDIO_PLAYBACK_COMPLETED', {
+        voiceId: metadata.voiceId,
+        text: metadata.text,
+        durationMs: Date.now() - startTime
+      }, correlationId);
+      this.eventBus?.publish('TTS_COMPLETED', {
+        voiceId: metadata.voiceId,
+        text: metadata.text,
+        durationMs: Date.now() - startTime
+      }, correlationId);
+
+      return {
+        success: true,
+        durationMs: Date.now() - startTime,
+        timeToFirstAudioMs: timeToFirstAudio || (Date.now() - startTime)
+      };
     } catch (err: any) {
       this.setState('ERROR', err.message);
       this.eventBus?.publish('AUDIO_PLAYBACK_FAILED', {
@@ -304,7 +448,10 @@ export class AudioOutputService {
 
     return new Promise<void>((resolve, reject) => {
       const escapedPath = filePath.replace(/'/g, "''");
-      const psCommand = `(New-Object System.Media.SoundPlayer '${escapedPath}').PlaySync()`;
+      const isWav = filePath.toLowerCase().endsWith('.wav');
+      const psCommand = isWav
+        ? `(New-Object System.Media.SoundPlayer '${escapedPath}').PlaySync()`
+        : `$w = New-Object -ComObject WMPlayer.OCX; $w.settings.volume = 100; $w.URL = '${escapedPath}'; $w.controls.play(); while ($w.playState -eq 3 -or $w.playState -eq 9 -or $w.playState -eq 10) { Start-Sleep -Milliseconds 50 }`;
 
       const child = spawn('powershell.exe', [
         '-NoProfile',

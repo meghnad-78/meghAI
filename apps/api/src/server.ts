@@ -9,10 +9,10 @@ import { EventBus } from '@meghai/events';
 import { PermissionBroker } from '@meghai/permissions';
 import { ToolRegistry } from '@meghai/tool-registry';
 import { ToolRuntime } from '@meghai/tool-runtime';
-import { ModelRouter } from '@meghai/model-router';
+import { ModelRouter, normalizeProviderId } from '@meghai/model-router';
 import { MemoryManager, ContextEngine } from '@meghai/memory';
 import { WindowsSystem } from '@meghai/windows';
-import { InputPipeline, DailyBriefService, RoutineEngine, ProactivityBudget, MemoryCommandParser } from '@meghai/ai-core';
+import { InputPipeline, DailyBriefService, RoutineEngine, ProactivityBudget, MemoryCommandParser, PersonalityManager } from '@meghai/ai-core';
 import {
   VoiceCatalog,
   VoiceCatalogService,
@@ -31,6 +31,7 @@ import { PersonalKnowledgeGraph } from '@meghai/knowledge-graph';
 import { IntegrationRegistry } from '@meghai/integrations';
 import { ObservabilityService } from '@meghai/observability';
 import { KillSwitch, PathValidator, IPCSecurity } from '@meghai/security';
+import { saveProviderCredential, loadStoredCredentials, loadConfig, ModelSettingsManager, ModelSettings } from '@meghai/config';
 import type {
   AIState,
   ToolCallRequest,
@@ -39,7 +40,9 @@ import type {
   AudioCueType,
   MemoryLayer,
   TaskState,
-  VoiceInputState
+  VoiceInputState,
+  OnlineSystemStatus,
+  STTQualityMode
 } from '@meghai/shared-types';
 
 export class MeghAIServer {
@@ -54,6 +57,8 @@ export class MeghAIServer {
   public voiceCatalog: VoiceCatalog;
   public voiceCatalogService: VoiceCatalogService;
   public voiceSettings: VoiceSettingsManager;
+  public modelSettings: ModelSettingsManager;
+  public personalityManager: PersonalityManager;
   public ttsProvider: WindowsSapiTTSProvider;
   public audioPlayback: AudioPlaybackService;
   public audioCapture: AudioCaptureService;
@@ -68,8 +73,12 @@ export class MeghAIServer {
 
   private server?: http.Server;
   private sseClients = new Set<http.ServerResponse>();
+  private processedVoiceCommands = new Set<string>();
 
   constructor(storageDir?: string) {
+    // Hydrate environment variables with stored credentials on boot before initializing components
+    loadConfig();
+
     this.db = new MeghAIDatabase(storageDir);
     this.eventBus = new EventBus();
     this.permissionBroker = new PermissionBroker([
@@ -94,9 +103,35 @@ export class MeghAIServer {
       audioOutput: this.audioPlayback,
       speechRecognition: this.speechRecognition,
       eventBus: this.eventBus,
-      onCommand: async (transcript) => {
-        this.eventBus.publish('VOICE_COMMAND_RECEIVED', { transcript });
-        await this.processUserRequest(transcript);
+      onCommand: async (transcript, meta) => {
+        const voiceSessionId = meta?.voiceSessionId;
+        const commandId = meta?.commandId;
+        const dedupeKey = commandId ? `${voiceSessionId || 'sess'}:${commandId}` : `cmd:${transcript.trim().toLowerCase()}`;
+
+        if (this.processedVoiceCommands.has(dedupeKey)) {
+          return;
+        }
+        this.processedVoiceCommands.add(dedupeKey);
+        if (this.processedVoiceCommands.size > 200) {
+          const first = this.processedVoiceCommands.values().next().value;
+          if (first) this.processedVoiceCommands.delete(first);
+        }
+
+        this.eventBus.publish('VOICE_COMMAND_RECEIVED', {
+          transcript,
+          voiceSessionId,
+          commandId
+        });
+
+        const currentModelSettings = this.modelSettings.getSettings();
+        console.log(`[MeghAI Voice Command] voiceSessionId=${voiceSessionId} commandId=${commandId} transcript="${transcript}" activeProvider=${currentModelSettings.selectedProvider} model=${currentModelSettings.selectedModel}`);
+        await this.processUserRequest(transcript, false, {
+          voiceSessionId,
+          commandId,
+          source: 'VOICE',
+          providerId: currentModelSettings.selectedProvider,
+          modelId: currentModelSettings.selectedModel
+        });
       }
     });
 
@@ -107,6 +142,8 @@ export class MeghAIServer {
         this.setAIState('UNDERSTANDING');
       } else if (state === 'PROCESSING') {
         this.setAIState('EXECUTING');
+      } else if (state === 'SPEAKING') {
+        this.setAIState('SPEAKING');
       } else if (state === 'PASSIVE_WAKE_LISTENING') {
         if (this.aiState !== 'SPEAKING') {
           this.setAIState('READY');
@@ -116,6 +153,8 @@ export class MeghAIServer {
 
     this.voiceCatalog = new VoiceCatalog();
     this.voiceSettings = new VoiceSettingsManager();
+    this.modelSettings = new ModelSettingsManager();
+    this.personalityManager = new PersonalityManager();
     this.routineEngine = new RoutineEngine();
     this.proactivityBudget = new ProactivityBudget();
     this.knowledgeGraph = new PersonalKnowledgeGraph();
@@ -148,6 +187,7 @@ export class MeghAIServer {
     // Wire KillSwitch to abort audio playback, cues, thinking loop, voice input, and microphone capture immediately
     KillSwitch.onKill((reason) => {
       this.audioPlayback.stop(reason);
+      this.voiceInput.exitSpeakingState(reason);
       this.voiceInput.stop(reason).catch(() => {});
       this.eventBus.publish('INTERRUPTED', { reason: 'Emergency Kill Switch Activated' });
       if (this.audioCapture.isCapturing()) {
@@ -342,17 +382,94 @@ export class MeghAIServer {
                 health: await p.checkHealth()
               }))
             );
+
+            // Determine truthful online system status (Section 27 & 39)
+            const configuredOnline = providers.filter(p => p.id !== 'local-ollama' && p.isConfigured);
+            let onlineStatus: OnlineSystemStatus = 'ONLINE';
+            if (configuredOnline.length === 0) {
+              onlineStatus = 'NO_CREDENTIALS';
+            } else {
+              const anyHealthy = configuredOnline.some(p => p.health.available);
+              onlineStatus = anyHealthy ? 'ONLINE' : 'ONLINE_DEGRADED';
+            }
+
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               system: sysInfo,
               aiState: this.aiState,
+              onlineStatus,
               killSwitchActive: KillSwitch.isActive(),
               providers,
               permissions: this.permissionBroker.listGrants(),
               microphone: {
                 state: this.audioCapture.getState(),
                 isCapturing: this.audioCapture.isCapturing()
-              }
+              },
+              voiceInputState: this.voiceInput.getState()
+            }));
+            return;
+          }
+
+          // Provider Diagnostics: /api/v1/providers/diagnostics
+          if (pathname === '/api/v1/providers/diagnostics' && req.method === 'GET') {
+            const modelProviders = await Promise.all(
+              this.modelRouter.listProviders().map(async p => ({
+                type: 'MODEL',
+                id: p.id,
+                name: p.name,
+                isConfigured: p.isConfigured(),
+                health: await p.checkHealth(),
+                modelCount: p.getModels().length
+              }))
+            );
+
+            const sttRouter = this.speechRecognition.getRouter();
+            const sttProviders = await Promise.all(
+              sttRouter.listProviders().map(async p => ({
+                type: 'STT',
+                id: p.id,
+                name: p.name,
+                isConfigured: typeof p.isConfigured === 'function' ? p.isConfigured() : true,
+                health: typeof p.healthCheck === 'function' ? await p.healthCheck() : { available: true, latencyMs: 0, isConfigured: true },
+                languages: p.getLanguages ? p.getLanguages() : []
+              }))
+            );
+
+            const ttsStats = this.voiceCatalogService.getStats();
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              modelProviders,
+              sttProviders,
+              ttsStats,
+              sttQualityMode: sttRouter.getQualityMode(),
+              sttKeyterms: sttRouter.getKeyterms()
+            }));
+            return;
+          }
+
+          // Save Provider BYOK Key: /api/v1/providers/keys
+          if (pathname === '/api/v1/providers/keys' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { providerId?: string; apiKey?: string };
+            if (!body.providerId || !body.apiKey) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'providerId and apiKey are required.' }));
+              return;
+            }
+
+            saveProviderCredential(body.providerId, body.apiKey);
+
+            // Update in-memory model router provider immediately without requiring server restart
+            this.modelRouter.updateProviderKey(body.providerId, body.apiKey);
+
+            // Refresh voice catalog cache with the new credential
+            await this.voiceCatalogService.refreshVoices().catch(() => {});
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              success: true,
+              providerId: body.providerId,
+              message: `API key for provider '${body.providerId}' saved and active.`
             }));
             return;
           }
@@ -527,6 +644,27 @@ export class MeghAIServer {
             return;
           }
 
+          // Model Settings: /api/v1/model/settings
+          if (pathname === '/api/v1/model/settings') {
+            if (req.method === 'GET') {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(this.modelSettings.getSettings()));
+              return;
+            }
+            if (req.method === 'POST') {
+              const body = await this.readJsonBody(req) as Partial<ModelSettings>;
+              const normalizedProvider = body.selectedProvider ? normalizeProviderId(body.selectedProvider) || body.selectedProvider : undefined;
+              const updated = this.modelSettings.updateSettings({
+                ...body,
+                ...(normalizedProvider ? { selectedProvider: normalizedProvider } : {})
+              });
+              this.eventBus.publish('MODEL_SETTINGS_CHANGED', updated);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(updated));
+              return;
+            }
+          }
+
           // Voice Settings: /api/v1/voice/settings
           if (pathname === '/api/v1/voice/settings') {
             if (req.method === 'GET') {
@@ -539,6 +677,43 @@ export class MeghAIServer {
               const updated = this.voiceSettings.updateSettings(body);
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify(updated));
+              return;
+            }
+          }
+
+          // Personality Settings: /api/v1/personalities
+          if (pathname === '/api/v1/personalities' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              profiles: this.personalityManager.listProfiles(),
+              activeProfileId: this.personalityManager.getActivePersonalityId(),
+              activeProfile: this.personalityManager.getActiveProfile()
+            }));
+            return;
+          }
+
+          if (pathname === '/api/v1/personalities/active' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(this.personalityManager.getActiveProfile()));
+            return;
+          }
+
+          if (pathname === '/api/v1/personalities/select' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { personalityId?: string };
+            if (!body?.personalityId) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'personalityId is required' }));
+              return;
+            }
+            try {
+              const active = this.personalityManager.setPersonality(body.personalityId);
+              this.eventBus.publish('PERSONALITY_SETTINGS_CHANGED', { activeProfile: active });
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true, activeProfile: active }));
+              return;
+            } catch (err: any) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
               return;
             }
           }
@@ -572,12 +747,17 @@ export class MeghAIServer {
 
               if (body.play !== false) {
                 this.setAIState('SPEAKING');
-                await this.audioPlayback.playTTS(synthesis, {
-                  voiceId: synthesis.voiceId,
-                  text: synthesis.spokenText,
-                  correlationId
-                });
-                this.setAIState('READY');
+                this.voiceInput.enterSpeakingState(synthesis.spokenText);
+                try {
+                  await this.audioPlayback.playTTS(synthesis, {
+                    voiceId: synthesis.voiceId,
+                    text: synthesis.spokenText,
+                    correlationId
+                  });
+                } finally {
+                  this.voiceInput.exitSpeakingState('Preview playback completed');
+                  this.setAIState('READY');
+                }
               }
 
               res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -644,6 +824,7 @@ export class MeghAIServer {
           // Voice Stop: /api/v1/voice/stop
           if (pathname === '/api/v1/voice/stop' && req.method === 'POST') {
             const stopped = this.audioPlayback.stop('User requested voice stop');
+            this.voiceInput.exitSpeakingState('User requested voice stop');
             if (stopped) {
               this.eventBus.publish('INTERRUPTED', { reason: 'User requested voice stop' });
             }
@@ -659,6 +840,58 @@ export class MeghAIServer {
           if (pathname === '/api/v1/voice/status' && req.method === 'GET') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(this.audioPlayback.getStatus()));
+            return;
+          }
+
+          // Voice Diagnostic Self-Test: /api/v1/voice/test
+          if (pathname === '/api/v1/voice/test' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { voiceId?: string; text?: string; play?: boolean };
+            const settings = this.voiceSettings.getSettings();
+            const voiceId = body.voiceId || settings.selectedVoiceId;
+            const textToSpeak = (body.text || 'MeghAI voice diagnostic check. All systems operational.').trim();
+            const startTime = Date.now();
+
+            try {
+              const synthesis = await this.voiceCatalogService.synthesize(textToSpeak, {
+                voiceId,
+                speechRate: settings.speechRate,
+                pitch: settings.pitch,
+                volume: settings.volume
+              });
+              const latencyMs = Date.now() - startTime;
+
+              let playbackResult: any = undefined;
+              if (body.play !== false) {
+                this.setAIState('SPEAKING');
+                playbackResult = await this.audioPlayback.playTTS(synthesis, {
+                  voiceId: synthesis.voiceId,
+                  text: synthesis.spokenText,
+                  correlationId: `test-${Date.now()}`
+                });
+                this.setAIState('READY');
+              }
+
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                success: true,
+                provider: this.voiceCatalogService.getProviderForVoice(voiceId)?.id || 'unknown',
+                voice: synthesis.voiceId,
+                latencyMs,
+                timeToFirstAudioMs: playbackResult?.timeToFirstAudioMs ?? latencyMs,
+                durationMs: synthesis.durationMs,
+                audioBase64: synthesis.audioBase64 ? `${synthesis.audioBase64.slice(0, 50)}...` : undefined
+              }));
+            } catch (err: any) {
+              if (this.aiState === 'SPEAKING') this.setAIState('READY');
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                success: false,
+                provider: this.voiceCatalogService.getProviderForVoice(voiceId)?.id || 'unknown',
+                voice: voiceId,
+                latencyMs: Date.now() - startTime,
+                error: err.message
+              }));
+            }
             return;
           }
 
@@ -848,8 +1081,22 @@ export class MeghAIServer {
             const body = await this.readJsonBody(req) as {
               text: string;
               userConfirmed?: boolean;
+              providerId?: string;
+              modelId?: string;
             };
-            const result = await this.processUserRequest(body.text, body.userConfirmed);
+            const currentSettings = this.modelSettings.getSettings();
+            const providerToUse = body.providerId !== undefined
+              ? body.providerId
+              : currentSettings.selectedProvider;
+            const modelToUse = body.modelId !== undefined
+              ? body.modelId
+              : currentSettings.selectedModel;
+
+            const result = await this.processUserRequest(body.text, body.userConfirmed, {
+              source: 'TEXT',
+              providerId: providerToUse,
+              modelId: modelToUse
+            });
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(result));
             return;
@@ -902,44 +1149,77 @@ export class MeghAIServer {
     }, ttsCorrId);
 
     try {
-      // 1. Synthesize audio across providers (SAPI, OneCore, Google Cloud, ElevenLabs)
-      const synthesis = await this.voiceCatalogService.synthesize(cleanSpeechText, {
-        voiceId: settings.selectedVoiceId,
-        speechRate: settings.speechRate,
-        pitch: settings.pitch,
-        volume: settings.volume
-      });
-
-      this.eventBus.publish('TTS_AUDIO_READY', {
-        voiceId: synthesis.voiceId,
-        durationMs: synthesis.durationMs,
-        format: synthesis.format
-      }, ttsCorrId);
-
-      // 2. Play subtle answer-ready chime cue before spoken response
-      try {
-        await this.audioPlayback.playCue('answer_ready');
-      } catch {}
-
-      // 3. Play the synthesized speech through the default Windows audio output device
       this.setAIState('SPEAKING');
-      await this.audioPlayback.playTTS(synthesis, {
-        voiceId: synthesis.voiceId,
-        text: cleanSpeechText,
-        correlationId: ttsCorrId
-      });
+      this.voiceInput.enterSpeakingState(cleanSpeechText);
 
-      this.setAIState('READY');
-      this.eventBus.publish('TTS_COMPLETED', {
-        voiceId: synthesis.voiceId,
-        durationMs: synthesis.durationMs
-      }, ttsCorrId);
+      // Attempt streaming playback first for lowest time-to-first-audio
+      let streamPlayed = false;
+      try {
+        const stream = await this.voiceCatalogService.synthesizeStream(cleanSpeechText, {
+          voiceId: settings.selectedVoiceId,
+          speechRate: settings.speechRate,
+          pitch: settings.pitch,
+          volume: settings.volume,
+          allowFallback: false
+        });
+
+        if (stream) {
+          const streamResult = await this.audioPlayback.playTTSStream(stream, {
+            voiceId: settings.selectedVoiceId,
+            text: cleanSpeechText,
+            correlationId: ttsCorrId
+          });
+          streamPlayed = true;
+          this.eventBus.publish('TTS_COMPLETED', {
+            voiceId: settings.selectedVoiceId,
+            durationMs: streamResult.durationMs,
+            timeToFirstAudioMs: streamResult.timeToFirstAudioMs
+          }, ttsCorrId);
+        }
+      } catch {
+        // Fall back to buffer-based synthesis
+      }
+
+      if (!streamPlayed) {
+        // 1. Synthesize audio across providers (SAPI, OneCore, Google Cloud, ElevenLabs, OpenAI)
+        const synthesis = await this.voiceCatalogService.synthesize(cleanSpeechText, {
+          voiceId: settings.selectedVoiceId,
+          speechRate: settings.speechRate,
+          pitch: settings.pitch,
+          volume: settings.volume
+        });
+
+        this.eventBus.publish('TTS_AUDIO_READY', {
+          voiceId: synthesis.voiceId,
+          durationMs: synthesis.durationMs,
+          format: synthesis.format
+        }, ttsCorrId);
+
+        // 2. Play subtle answer-ready chime cue before spoken response
+        try {
+          await this.audioPlayback.playCue('answer_ready');
+        } catch {}
+
+        // 3. Play synthesized speech through default audio output device
+        await this.audioPlayback.playTTS(synthesis, {
+          voiceId: synthesis.voiceId,
+          text: cleanSpeechText,
+          correlationId: ttsCorrId
+        });
+
+        this.eventBus.publish('TTS_COMPLETED', {
+          voiceId: synthesis.voiceId,
+          durationMs: synthesis.durationMs
+        }, ttsCorrId);
+      }
     } catch (err: any) {
+      this.eventBus.publish('TTS_FAILED', { error: err.message, voiceId: settings.selectedVoiceId }, ttsCorrId);
+      this.eventBus.publish('VOICE_ERROR', { error: err.message }, ttsCorrId);
+    } finally {
+      this.voiceInput.exitSpeakingState('TTS playback completed');
       if (this.aiState === 'SPEAKING') {
         this.setAIState('READY');
       }
-      this.eventBus.publish('TTS_FAILED', { error: err.message, voiceId: settings.selectedVoiceId }, ttsCorrId);
-      this.eventBus.publish('VOICE_ERROR', { error: err.message }, ttsCorrId);
     }
   }
 
@@ -948,10 +1228,22 @@ export class MeghAIServer {
    */
   public async processUserRequest(
     rawText: string,
-    userConfirmed = false
+    userConfirmed = false,
+    meta?: {
+      voiceSessionId?: string;
+      commandId?: string;
+      source?: 'VOICE' | 'TEXT';
+      providerId?: string;
+      modelId?: string;
+    }
   ): Promise<Record<string, unknown>> {
-    const correlationId = `req-${Date.now()}`;
-    this.eventBus.publish('USER_INPUT_RECEIVED', { rawText }, correlationId);
+    const correlationId = meta?.commandId || `req-${Date.now()}`;
+    this.eventBus.publish('USER_INPUT_RECEIVED', {
+      rawText,
+      voiceSessionId: meta?.voiceSessionId,
+      commandId: meta?.commandId,
+      source: meta?.source || 'TEXT'
+    }, correlationId);
 
     // 1. Core Input Pipeline
     this.setAIState('UNDERSTANDING');
@@ -1018,9 +1310,15 @@ export class MeghAIServer {
         timelineCorrelationId: correlationId
       };
       this.setAIState('READY');
-      this.eventBus.publish('TASK_COMPLETED', response, correlationId);
-      if (this.voiceSettings.getSettings().autoSpeak === 'ON') {
-        this.speakResponse(response.reply, correlationId).catch(() => {});
+      this.eventBus.publish('TASK_COMPLETED', {
+        ...response,
+        voiceSessionId: meta?.voiceSessionId,
+        commandId: meta?.commandId
+      }, correlationId);
+      if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+        try {
+          await this.speakResponse(response.reply, correlationId);
+        } catch {}
       }
       return response;
     }
@@ -1052,9 +1350,15 @@ export class MeghAIServer {
         timelineCorrelationId: correlationId
       };
       this.setAIState('READY');
-      this.eventBus.publish('TASK_COMPLETED', response, correlationId);
-      if (this.voiceSettings.getSettings().autoSpeak === 'ON') {
-        this.speakResponse(response.reply, correlationId).catch(() => {});
+      this.eventBus.publish('TASK_COMPLETED', {
+        ...response,
+        voiceSessionId: meta?.voiceSessionId,
+        commandId: meta?.commandId
+      }, correlationId);
+      if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+        try {
+          await this.speakResponse(response.reply, correlationId);
+        } catch {}
       }
       return response;
     }
@@ -1086,7 +1390,16 @@ export class MeghAIServer {
         timelineCorrelationId: correlationId
       };
       this.setAIState('READY');
-      this.eventBus.publish('TASK_COMPLETED', response, correlationId);
+      this.eventBus.publish('TASK_COMPLETED', {
+        ...response,
+        voiceSessionId: meta?.voiceSessionId,
+        commandId: meta?.commandId
+      }, correlationId);
+      if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+        try {
+          await this.speakResponse(response.reply, correlationId);
+        } catch {}
+      }
       return response;
     }
 
@@ -1124,7 +1437,16 @@ export class MeghAIServer {
         timelineCorrelationId: correlationId
       };
       this.setAIState('READY');
-      this.eventBus.publish('TASK_COMPLETED', response, correlationId);
+      this.eventBus.publish('TASK_COMPLETED', {
+        ...response,
+        voiceSessionId: meta?.voiceSessionId,
+        commandId: meta?.commandId
+      }, correlationId);
+      if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+        try {
+          await this.speakResponse(response.reply, correlationId);
+        } catch {}
+      }
       return response;
     }
 
@@ -1168,7 +1490,16 @@ export class MeghAIServer {
               timelineCorrelationId: correlationId
             };
             this.setAIState('READY');
-            this.eventBus.publish('TASK_COMPLETED', response, correlationId);
+            this.eventBus.publish('TASK_COMPLETED', {
+              ...response,
+              voiceSessionId: meta?.voiceSessionId,
+              commandId: meta?.commandId
+            }, correlationId);
+            if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+              try {
+                await this.speakResponse(response.reply, correlationId);
+              } catch {}
+            }
             return response;
           } else {
             this.setAIState('RESPONDING');
@@ -1180,7 +1511,16 @@ export class MeghAIServer {
               timelineCorrelationId: correlationId
             };
             this.setAIState('READY');
-            this.eventBus.publish('TASK_COMPLETED', response, correlationId);
+            this.eventBus.publish('TASK_COMPLETED', {
+              ...response,
+              voiceSessionId: meta?.voiceSessionId,
+              commandId: meta?.commandId
+            }, correlationId);
+            if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+              try {
+                await this.speakResponse(response.reply, correlationId);
+              } catch {}
+            }
             return response;
           }
         } catch (err: any) {
@@ -1266,9 +1606,15 @@ export class MeghAIServer {
           timelineCorrelationId: correlationId
         };
         this.setAIState('READY');
-        this.eventBus.publish('TASK_COMPLETED', response, correlationId);
-        if (this.voiceSettings.getSettings().autoSpeak === 'ON') {
-          this.speakResponse(response.reply, correlationId).catch(() => {});
+        this.eventBus.publish('TASK_COMPLETED', {
+          ...response,
+          voiceSessionId: meta?.voiceSessionId,
+          commandId: meta?.commandId
+        }, correlationId);
+        if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+          try {
+            await this.speakResponse(response.reply, correlationId);
+          } catch {}
         }
         return response;
       } catch (err: any) {
@@ -1306,35 +1652,56 @@ export class MeghAIServer {
       }, correlationId);
     }
 
-    const systemPrompt = assembledContext.formattedMemoryContext
-      ? `You are MeghAI, the user's personal AI operating assistant. You have access to verified persistent user memories:\n\n${assembledContext.formattedMemoryContext}\n\nAnswer the user's question directly using these memories when relevant.`
-      : undefined;
+    const systemPrompt = this.personalityManager.buildSystemPrompt(assembledContext.formattedMemoryContext);
 
+    const currentSettings = this.modelSettings.getSettings();
+    const rawReqProvider = meta?.providerId !== undefined ? meta.providerId : currentSettings.selectedProvider;
+    const rawReqModel = meta?.modelId !== undefined ? meta.modelId : currentSettings.selectedModel;
+    const canonicalReqProvider = normalizeProviderId(rawReqProvider);
+    const explicitProvider = canonicalReqProvider && canonicalReqProvider !== 'auto' ? canonicalReqProvider : undefined;
     const modelReq: ModelRequest = {
       messages: [
         ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
         { role: 'user' as const, content: pipeline.normalizedText }
-      ]
+      ],
+      providerId: explicitProvider,
+      modelId: rawReqModel
     };
-    const routeDecision = await this.modelRouter.route(modelReq);
+
+    const allowExplicitFallback = this.modelSettings.getSettings().allowExplicitFallback ?? false;
+
+    const routeDecision = await this.modelRouter.route(modelReq, {
+      allowExplicitFallback: explicitProvider ? allowExplicitFallback : true
+    });
     this.eventBus.publish('MODEL_SELECTED', routeDecision, correlationId);
 
     modelReq.modelId = routeDecision.selectedModel;
 
-    const provider = this.modelRouter.getProvider(routeDecision.selectedProvider);
-    if (!provider || !provider.isConfigured()) {
+    console.log(`[MeghAI Router] reqId=${correlationId} requestedProvider=${explicitProvider || 'auto'} requestedModel=${rawReqModel || 'default'} actualProvider=${routeDecision.selectedProvider} model=${routeDecision.selectedModel} source=${meta?.source || 'TEXT'}`);
+
+    if (routeDecision.selectedProvider === ('none' as any)) {
       this.setAIState('READY');
+      const noKeyMsg = 'NO_ONLINE_MODEL_CONFIGURED: Please configure an API key for Google Gemini, OpenAI, Claude, or DeepSeek in Provider Center.';
+      this.eventBus.publish('TASK_FAILED', {
+        status: 'NO_ONLINE_MODEL_CONFIGURED',
+        error: noKeyMsg,
+        requestedProvider: explicitProvider || 'auto'
+      }, correlationId);
       return {
-        status: 'LOCAL_MODE',
-        reply: `MeghAI is running in Local Mode. Cloud provider '${routeDecision.selectedProvider}' is not configured with an API key. (Section 206)`,
-        provider: routeDecision.selectedProvider,
-        routeDecision
+        status: 'NO_ONLINE_MODEL_CONFIGURED',
+        reply: noKeyMsg,
+        provider: 'none',
+        routeDecision,
+        requestedProvider: explicitProvider || 'auto',
+        timelineCorrelationId: correlationId
       };
     }
 
     this.eventBus.publish('MODEL_STARTED', {
       provider: routeDecision.selectedProvider,
       model: routeDecision.selectedModel,
+      requestedProvider: explicitProvider || 'auto',
+      requestedModel: rawReqModel,
       correlationId
     }, correlationId);
 
@@ -1343,46 +1710,132 @@ export class MeghAIServer {
 
     this.setAIState('RESPONDING');
     try {
-      const modelRes = await provider.complete(modelReq);
+      const modelRes = await this.modelRouter.completeWithFallback(modelReq, {
+        allowExplicitFallback: explicitProvider ? allowExplicitFallback : true
+      });
       // Immediately stop thinking loop once model response arrives
       this.audioPlayback.stopThinkingLoop();
+
+      if (modelRes.fallbackOccurred) {
+        this.eventBus.publish('MODEL_FALLBACK', {
+          originalProvider: routeDecision.selectedProvider,
+          fallbackProvider: modelRes.providerId,
+          fallbackModel: modelRes.modelId,
+          reason: modelRes.fallbackReason
+        }, correlationId);
+      }
 
       this.eventBus.publish('MODEL_COMPLETED', {
         provider: modelRes.providerId,
         model: modelRes.modelId,
+        requestedProvider: explicitProvider || 'auto',
+        requestedModel: rawReqModel,
+        actualProvider: modelRes.providerId,
+        actualModel: modelRes.modelId,
         tokensUsed: modelRes.tokensUsed,
-        latencyMs: modelRes.latencyMs
+        latencyMs: modelRes.latencyMs,
+        fallbackOccurred: modelRes.fallbackOccurred
       }, correlationId);
+
+      // Record token and latency observability
+      if (modelRes.tokensUsed) {
+        const promptTokens = modelRes.tokensUsed.promptTokens || Math.round(modelRes.tokensUsed.totalTokens * 0.4);
+        const completionTokens = modelRes.tokensUsed.completionTokens || Math.round(modelRes.tokensUsed.totalTokens * 0.6);
+        this.observability.recordTokenUsage(
+          modelRes.providerId,
+          modelRes.modelId,
+          promptTokens,
+          completionTokens
+        );
+      }
 
       const response = {
         status: 'COMPLETED',
         reply: modelRes.content,
         provider: modelRes.providerId,
         modelId: modelRes.modelId,
+        requestedProvider: explicitProvider || 'auto',
+        requestedModel: rawReqModel,
+        actualProvider: modelRes.providerId,
+        actualModel: modelRes.modelId,
+        fallbackOccurred: modelRes.fallbackOccurred ?? false,
+        fallbackReason: modelRes.fallbackReason,
         tokensUsed: modelRes.tokensUsed,
         timelineCorrelationId: correlationId
       };
       this.setAIState('READY');
-      this.eventBus.publish('TASK_COMPLETED', response, correlationId);
-      if (this.voiceSettings.getSettings().autoSpeak === 'ON') {
-        this.speakResponse(response.reply, correlationId).catch(err => {
+      this.eventBus.publish('TASK_COMPLETED', {
+        ...response,
+        voiceSessionId: meta?.voiceSessionId,
+        commandId: meta?.commandId
+      }, correlationId);
+
+      if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+        try {
+          await this.speakResponse(response.reply, correlationId);
+        } catch (err) {
           console.error('[MeghAI Voice] Spoken response error:', err);
-        });
+        }
       }
       return response;
-    } catch (err) {
+    } catch (err: any) {
       this.audioPlayback.stopThinkingLoop();
       this.setAIState('READY');
+
+      const failedProvider = explicitProvider || routeDecision.selectedProvider;
+
+      const isRateLimited = Boolean(
+        err.isRateLimit ||
+        err.status === 429 ||
+        (typeof err.message === 'string' && err.message.includes('429'))
+      );
+
+      if (isRateLimited) {
+        this.eventBus.publish('VOICE_MODEL_RATE_LIMITED', {
+          provider: failedProvider,
+          error: err.message,
+          requestedProvider: explicitProvider || 'auto',
+          voiceSessionId: meta?.voiceSessionId,
+          commandId: meta?.commandId
+        }, correlationId);
+      }
+
+      let replyMessage: string;
+      if (isRateLimited) {
+        replyMessage = `${failedProvider.toUpperCase()} rate limit / quota exceeded (HTTP 429). Please wait a few moments before trying again.`;
+      } else if (err.message && err.message.startsWith('All candidate providers failed:')) {
+        replyMessage = `Error executing AI request: ${err.message}`;
+      } else {
+        replyMessage = `Error communicating with model provider (${failedProvider}): ${err.message}`;
+      }
+
       this.eventBus.publish('TASK_FAILED', {
-        status: 'FAILED',
-        error: (err as Error).message,
-        provider: routeDecision.selectedProvider,
-        model: routeDecision.selectedModel
+        status: isRateLimited ? 'RATE_LIMITED' : 'FAILED',
+        error: err.message,
+        reply: replyMessage,
+        provider: failedProvider,
+        model: routeDecision.selectedModel,
+        requestedProvider: explicitProvider || 'auto',
+        actualProvider: failedProvider,
+        fallbackOccurred: false,
+        voiceSessionId: meta?.voiceSessionId,
+        commandId: meta?.commandId
       }, correlationId);
+
+      // Auditory feedback for voice failure
+      if (meta?.source === 'VOICE' && this.voiceSettings.getSettings().autoSpeak === 'ON') {
+        try {
+          await this.audioPlayback.playCue('interrupt');
+        } catch {}
+      }
+
       return {
-        status: 'FAILED',
-        error: (err as Error).message,
-        reply: `Error communicating with model provider (${routeDecision.selectedProvider}): ${(err as Error).message}`,
+        status: isRateLimited ? 'RATE_LIMITED' : 'FAILED',
+        error: err.message,
+        reply: replyMessage,
+        requestedProvider: explicitProvider || 'auto',
+        actualProvider: failedProvider,
+        fallbackOccurred: false,
         timelineCorrelationId: correlationId
       };
     }

@@ -12,6 +12,7 @@ describe('Phase 0 Complete Vertical Slice: "Megh, create a note" (Section 166 & 
   beforeAll(async () => {
     testStorageDir = path.join(os.tmpdir(), `meghai_vslice_${Date.now()}`);
     server = new MeghAIServer(testStorageDir);
+    await server.voiceSettings.updateSettings({ autoSpeak: 'OFF' });
     testPort = await server.start(4899);
   });
 

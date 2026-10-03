@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import type { AIState, MeghAIEvent, MicrophoneState, VoiceInputState } from '@meghai/shared-types';
+import type { AIState, MeghAIEvent, MicrophoneState, VoiceInputState, OnlineSystemStatus } from '@meghai/shared-types';
 import { AICore } from './components/AICore.js';
-import { TopHUD } from './components/TopHUD.js';
-import { ActionTimeline } from './components/ActionTimeline.js';
+import { TopBar } from './components/TopBar.js';
+import { ChatView, type ChatMessage } from './components/ChatView.js';
+import { Composer } from './components/Composer.js';
+import { ActionTimelineDrawer } from './components/ActionTimelineDrawer.js';
+import { ModelSelectorModal } from './components/ModelSelectorModal.js';
+import { VoiceSelectorModal } from './components/VoiceSelectorModal.js';
+import { PersonalitySelectorModal } from './components/PersonalitySelectorModal.js';
 import { CommandPalette } from './components/CommandPalette.js';
 import { NotesCenter } from './components/NotesCenter.js';
 import { TaskCenter } from './components/TaskCenter.js';
@@ -12,15 +17,7 @@ import { VoiceStudio } from './components/VoiceStudio.js';
 import { RoutineCenter } from './components/RoutineCenter.js';
 import { ProviderCenter } from './components/ProviderCenter.js';
 import { PermissionCenter } from './components/PermissionCenter.js';
-
-interface Message {
-  id: string;
-  sender: 'user' | 'megh';
-  text: string;
-  verificationStatus?: 'VERIFIED' | 'UNVERIFIED' | 'FAILED';
-  verificationDetails?: string;
-  timestamp: string;
-}
+import { tokens } from './theme/tokens.js';
 
 export type ActiveTab =
   | 'home'
@@ -38,11 +35,11 @@ export const App: React.FC = () => {
   const [micState, setMicState] = useState<MicrophoneState>('MIC_OFF');
   const [voiceInputState, setVoiceInputState] = useState<VoiceInputState>('IDLE');
   const [micLevel, setMicLevel] = useState<number>(0);
-  const [isLocalMode, setIsLocalMode] = useState<boolean>(true);
+  const [onlineStatus, setOnlineStatus] = useState<OnlineSystemStatus>('ONLINE');
   const [autoSpeak, setAutoSpeak] = useState<'OFF' | 'ON' | 'ASK'>('ON');
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [events, setEvents] = useState<MeghAIEvent[]>([]);
-  const [messages, setMessages] = useState<Message[]>([
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       sender: 'megh',
@@ -53,10 +50,40 @@ export const App: React.FC = () => {
     }
   ]);
   const [inputText, setInputText] = useState('');
+  const [liveTranscript, setLiveTranscript] = useState<string | null>(null);
+
+  // Modals & Panels State
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
+  const [isVoiceSelectorOpen, setIsVoiceSelectorOpen] = useState(false);
+  const [isPersonalitySelectorOpen, setIsPersonalitySelectorOpen] = useState(false);
+  const [isTimelineOpen, setIsTimelineOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
 
-  // Global Keyboard Shortcuts (Ctrl+Space for Palette, Escape to close)
+  // Selected Personality
+  const [selectedPersonalityId, setSelectedPersonalityId] = useState<string>('futuristic');
+  const [selectedPersonalityName, setSelectedPersonalityName] = useState<string>('Futuristic');
+  const [personalityStyle, setPersonalityStyle] = useState<string>('orbital');
+
+  // Selected Providers & Voices (Loaded from persistent store + localStorage cache)
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    try {
+      return localStorage.getItem('meghai_selected_provider') || 'local-ollama';
+    } catch {
+      return 'local-ollama';
+    }
+  });
+  const [selectedModelId, setSelectedModelId] = useState<string | undefined>(() => {
+    try {
+      return localStorage.getItem('meghai_selected_model_id') || 'llama3.2:latest';
+    } catch {
+      return 'llama3.2:latest';
+    }
+  });
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string>('onecore-heera');
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('Heera');
+
+  // Global Keyboard Shortcuts (Ctrl+Space for Palette)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.code === 'Space') {
@@ -96,50 +123,121 @@ export const App: React.FC = () => {
           } else if (mEvt.type === 'MIC_STOPPING') {
             setMicState('MIC_STOPPING');
             setVoiceInputState('IDLE');
+            setLiveTranscript(null);
           } else if (mEvt.type === 'MIC_OFF') {
             setMicState('MIC_OFF');
             setVoiceInputState('IDLE');
             setMicLevel(0);
+            setLiveTranscript(null);
             setAiState(prev => prev === 'LISTENING' ? 'READY' : prev);
           } else if (mEvt.type === 'MIC_DEVICE_UNAVAILABLE') {
             setMicState('MIC_DEVICE_UNAVAILABLE');
             setVoiceInputState('IDLE');
             setMicLevel(0);
+            setLiveTranscript(null);
           } else if (mEvt.type === 'VOICE_INPUT_STATE_CHANGED') {
             const payload = mEvt.payload as { state: VoiceInputState };
             if (payload?.state) {
               setVoiceInputState(payload.state);
+              if (payload.state === 'IDLE') {
+                setLiveTranscript(null);
+              }
+            }
+          } else if (mEvt.type === 'TRANSCRIPT_PARTIAL') {
+            // Streaming / interim transcript preview: isolated to preview chip
+            const payload = mEvt.payload as { text?: string };
+            if (payload?.text) {
+              setLiveTranscript(payload.text);
             }
           } else if (mEvt.type === 'TRANSCRIPT_FINAL') {
-            const payload = mEvt.payload as { text: string };
-            if (payload?.text) {
-              setMessages(prev => [
-                ...prev,
-                {
-                  id: `usr-voice-${Date.now()}`,
-                  sender: 'user',
-                  text: `🎙️ ${payload.text}`,
-                  timestamp: new Date().toLocaleTimeString()
-                }
-              ]);
-            }
-          } else if (mEvt.type === 'TASK_COMPLETED') {
-            const payload = mEvt.payload as { reply?: string; verificationStatus?: any; verificationDetails?: string };
-            if (payload?.reply) {
+            setLiveTranscript(null);
+            const payload = mEvt.payload as {
+              commandId?: string;
+              voiceSessionId?: string;
+              text?: string;
+              rawText?: string;
+              interpretedText?: string;
+            };
+            const displayText = payload?.interpretedText || payload?.text || payload?.rawText;
+            if (displayText) {
+              const rawSuffix = payload?.rawText && payload?.interpretedText && payload.rawText !== payload.interpretedText
+                ? ` (raw: "${payload.rawText}")`
+                : '';
+              const userBubbleText = `🎙️ ${displayText}${rawSuffix}`;
+              const msgId = payload?.commandId ? `usr-voice-${payload.commandId}` : `usr-voice-${Date.now()}`;
               setMessages(prev => {
-                if (prev.some(m => m.text === payload.reply)) return prev;
+                // Idempotency: Prevent duplicate message bubbles for the same voice command
+                if (prev.some(m => m.id === msgId || (m.sender === 'user' && m.text === userBubbleText))) {
+                  return prev;
+                }
                 return [
                   ...prev,
                   {
-                    id: `megh-resp-${Date.now()}`,
-                    sender: 'megh',
-                    text: payload.reply!,
-                    verificationStatus: payload.verificationStatus,
-                    verificationDetails: payload.verificationDetails,
+                    id: msgId,
+                    sender: 'user',
+                    text: userBubbleText,
                     timestamp: new Date().toLocaleTimeString()
                   }
                 ];
               });
+            }
+          } else if (mEvt.type === 'TASK_COMPLETED') {
+            setLiveTranscript(null);
+            const payload = mEvt.payload as {
+              reply?: string;
+              verificationStatus?: any;
+              verificationDetails?: string;
+              commandId?: string;
+              provider?: string;
+              modelId?: string;
+            };
+            if (payload?.reply) {
+              const respId = payload?.commandId ? `megh-resp-${payload.commandId}` : `megh-resp-${Date.now()}`;
+              setMessages(prev => {
+                if (prev.some(m => m.id === respId || m.text === payload.reply)) return prev;
+                return [
+                  ...prev,
+                  {
+                    id: respId,
+                    sender: 'megh',
+                    text: payload.reply!,
+                    verificationStatus: payload.verificationStatus,
+                    verificationDetails: payload.verificationDetails,
+                    provider: payload.provider,
+                    modelId: payload.modelId,
+                    timestamp: new Date().toLocaleTimeString()
+                  }
+                ];
+              });
+            }
+          } else if (mEvt.type === 'TASK_FAILED' || mEvt.type === 'VOICE_MODEL_RATE_LIMITED') {
+            setLiveTranscript(null);
+            const payload = mEvt.payload as {
+              reply?: string;
+              error?: string;
+              commandId?: string;
+            };
+            const errorReply = payload?.reply || (payload?.error ? `⚠️ ${payload.error}` : 'Unable to complete request.');
+            const errId = payload?.commandId ? `megh-err-${payload.commandId}` : `megh-err-${Date.now()}`;
+            setMessages(prev => {
+              if (prev.some(m => m.id === errId || m.text === errorReply)) return prev;
+              return [
+                ...prev,
+                {
+                  id: errId,
+                  sender: 'megh',
+                  text: errorReply,
+                  verificationStatus: 'FAILED',
+                  timestamp: new Date().toLocaleTimeString()
+                }
+              ];
+            });
+          } else if (mEvt.type === 'PERSONALITY_SETTINGS_CHANGED') {
+            const payload = mEvt.payload as { activeProfile?: any };
+            if (payload?.activeProfile) {
+              setSelectedPersonalityId(payload.activeProfile.id);
+              setSelectedPersonalityName(payload.activeProfile.name || payload.activeProfile.id);
+              if (payload.activeProfile.visualStyle) setPersonalityStyle(payload.activeProfile.visualStyle);
             }
           }
         }
@@ -152,12 +250,13 @@ export const App: React.FC = () => {
     fetch('/api/v1/system/status')
       .then(res => res.json())
       .then(data => {
-        if (data.providers) {
-          const hasCloud = data.providers.some((p: any) => p.isConfigured && p.id !== 'local-ollama');
-          setIsLocalMode(!hasCloud);
+        if (data.onlineStatus) {
+          setOnlineStatus(data.onlineStatus);
         }
       })
-      .catch(() => setIsLocalMode(true));
+      .catch(() => {
+        setOnlineStatus('NETWORK_UNAVAILABLE');
+      });
 
     // Check initial microphone status
     fetch('/api/v1/voice/mic/status')
@@ -172,12 +271,44 @@ export const App: React.FC = () => {
       })
       .catch(() => {});
 
-    // Check voice settings (including persistent autoSpeak mode)
+    // Check voice settings (including persistent autoSpeak mode and selected voice)
     fetch('/api/v1/voice/settings')
       .then(res => res.json())
       .then(data => {
         if (data?.autoSpeak) {
           setAutoSpeak(data.autoSpeak);
+        }
+        if (data?.selectedVoiceId) {
+          setSelectedVoiceId(data.selectedVoiceId);
+          const cleanName = data.selectedVoiceId.replace(/^onecore-|^local-/, '');
+          setSelectedVoiceName(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
+        }
+      })
+      .catch(() => {});
+
+    // Check model settings (including persistent selected model provider)
+    fetch('/api/v1/model/settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.selectedProvider) {
+          setSelectedModel(data.selectedProvider);
+          if (data?.selectedModel) setSelectedModelId(data.selectedModel);
+          try {
+            localStorage.setItem('meghai_selected_provider', data.selectedProvider);
+            if (data?.selectedModel) localStorage.setItem('meghai_selected_model_id', data.selectedModel);
+          } catch {}
+        }
+      })
+      .catch(() => {});
+
+    // Check personality settings
+    fetch('/api/v1/personalities/active')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.id) {
+          setSelectedPersonalityId(data.id);
+          setSelectedPersonalityName(data.name || data.id);
+          if (data.visualStyle) setPersonalityStyle(data.visualStyle);
         }
       })
       .catch(() => {});
@@ -187,6 +318,26 @@ export const App: React.FC = () => {
     };
   }, []);
 
+  const handleSelectModel = async (providerId: string, modelId?: string) => {
+    setSelectedModel(providerId);
+    setSelectedModelId(modelId);
+    try {
+      localStorage.setItem('meghai_selected_provider', providerId);
+      if (modelId) localStorage.setItem('meghai_selected_model_id', modelId);
+      else localStorage.removeItem('meghai_selected_model_id');
+      await fetch('/api/v1/model/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectedProvider: providerId,
+          selectedModel: modelId
+        })
+      });
+    } catch (err) {
+      console.error('[MeghAI UI] Failed to persist model settings to server:', err);
+    }
+  };
+
   const handleToggleAutoSpeak = async () => {
     const nextMode: 'OFF' | 'ON' | 'ASK' = autoSpeak === 'ON' ? 'OFF' : 'ON';
     setAutoSpeak(nextMode);
@@ -195,6 +346,19 @@ export const App: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ autoSpeak: nextMode })
+      });
+    } catch {}
+  };
+
+  const handleSelectVoice = async (voiceId: string) => {
+    setSelectedVoiceId(voiceId);
+    const cleanName = voiceId.replace(/^onecore-|^local-/, '');
+    setSelectedVoiceName(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
+    try {
+      await fetch('/api/v1/voice/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selectedVoiceId: voiceId })
       });
     } catch {}
   };
@@ -213,7 +377,7 @@ export const App: React.FC = () => {
       await fetch('/api/v1/voice/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({ text, voiceId: selectedVoiceId })
       });
     } catch {} finally {
       setSpeakingMsgId(null);
@@ -223,7 +387,7 @@ export const App: React.FC = () => {
   const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
 
-    const userMsg: Message = {
+    const userMsg: ChatMessage = {
       id: `usr-${Date.now()}`,
       sender: 'user',
       text,
@@ -236,16 +400,22 @@ export const App: React.FC = () => {
       const res = await fetch('/api/v1/input/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text })
+        body: JSON.stringify({
+          text,
+          providerId: selectedModel,
+          modelId: selectedModelId
+        })
       });
       const data = await res.json() as any;
 
-      const meghMsg: Message = {
+      const meghMsg: ChatMessage = {
         id: `megh-${Date.now()}`,
         sender: 'megh',
         text: data.reply || data.clarificationPrompt || JSON.stringify(data),
         verificationStatus: data.verificationStatus,
         verificationDetails: data.verificationDetails,
+        provider: data.provider,
+        modelId: data.modelId,
         timestamp: new Date().toLocaleTimeString()
       };
       setMessages(prev => [...prev, meghMsg]);
@@ -306,253 +476,146 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh', background: '#07090e', color: '#f8fafc' }}>
-      {/* Top HUD */}
-      <TopHUD
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100vw',
+        height: '100vh',
+        background: tokens.colors.bg.canvas,
+        color: tokens.colors.text.primary,
+        overflow: 'hidden',
+        position: 'relative'
+      }}
+    >
+      {/* Master Top Bar */}
+      <TopBar
         aiState={aiState}
         micState={micState}
         voiceInputState={voiceInputState}
         micLevel={micLevel}
-        isLocalMode={isLocalMode}
+        onlineStatus={onlineStatus}
         autoSpeak={autoSpeak}
+        selectedModel={selectedModel}
+        selectedVoiceName={selectedVoiceName}
+        selectedPersonalityName={selectedPersonalityName}
+        eventCount={events.length}
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
         onToggleAutoSpeak={handleToggleAutoSpeak}
-        onEmergencyStop={handleEmergencyStop}
         onToggleMic={handleToggleMic}
+        onOpenModelSelector={() => setIsModelSelectorOpen(true)}
+        onOpenVoiceSelector={() => setIsVoiceSelectorOpen(true)}
+        onOpenPersonalitySelector={() => setIsPersonalitySelectorOpen(true)}
+        onToggleTimeline={() => setIsTimelineOpen(prev => !prev)}
+        onEmergencyStop={handleEmergencyStop}
       />
 
-      {/* Main 3-Column Workspace Layout */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Left Navigation Bar */}
-        <aside style={{
-          width: '72px',
-          background: 'rgba(11, 15, 25, 0.7)',
-          borderRight: '1px solid rgba(255, 255, 255, 0.08)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          padding: '20px 0',
-          gap: '14px',
-          overflowY: 'auto'
-        }}>
-          {[
-            { id: 'home', label: 'Home (AI Core)', icon: '⚡' },
-            { id: 'notes', label: 'Notes & Facts', icon: '📝' },
-            { id: 'tasks', label: 'Tasks & DAG', icon: '✓' },
-            { id: 'memory', label: 'Memory Center', icon: '🧠' },
-            { id: 'knowledge', label: 'Knowledge Graph', icon: '🌐' },
-            { id: 'voice', label: 'Voice Studio', icon: '🎙️' },
-            { id: 'routines', label: 'Routines & Brief', icon: '⏱️' },
-            { id: 'providers', label: 'Providers & Costs', icon: '☁️' },
-            { id: 'permissions', label: 'Safety & Policy', icon: '🛡️' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
-              style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '12px',
-                border: activeTab === tab.id ? '1px solid #00f0ff' : '1px solid rgba(255, 255, 255, 0.06)',
-                background: activeTab === tab.id ? 'rgba(0, 240, 255, 0.15)' : 'transparent',
-                color: activeTab === tab.id ? '#00f0ff' : '#94a3b8',
-                fontSize: '18px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease',
-                flexShrink: 0
-              }}
-              title={tab.label}
-            >
-              {tab.icon}
-            </button>
-          ))}
-        </aside>
-
-        {/* Center Canvas: Living AI Core or Dedicated Center Panes */}
-        <main style={{
+      {/* Main Workspace Frame */}
+      <main
+        style={{
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
           position: 'relative',
-          background: 'radial-gradient(ellipse at 50% 20%, rgba(138, 43, 226, 0.08) 0%, rgba(7, 9, 14, 0) 70%)',
-          overflow: 'hidden'
-        }}>
-          {activeTab === 'home' && (
-            <>
-              {/* Living Adaptive AI Core Animation */}
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0 0 0' }}>
-                <AICore state={aiState} size={240} />
-              </div>
-
-              {/* Conversation Stream */}
-              <div style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: '16px 32px',
+          overflow: 'hidden',
+          background: 'radial-gradient(ellipse at 50% 12%, rgba(0, 240, 255, 0.04) 0%, rgba(4, 6, 10, 0) 65%)'
+        }}
+      >
+        {activeTab === 'home' && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+            {/* Signature Central AI Core Visualization */}
+            <div
+              style={{
                 display: 'flex',
-                flexDirection: 'column',
-                gap: '16px'
-              }}>
-                {messages.map(msg => (
-                  <div
-                    key={msg.id}
-                    style={{
-                      alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start',
-                      maxWidth: '75%',
-                      background: msg.sender === 'user' ? 'rgba(0, 240, 255, 0.12)' : 'rgba(15, 23, 42, 0.75)',
-                      border: `1px solid ${msg.sender === 'user' ? 'rgba(0, 240, 255, 0.3)' : 'rgba(255, 255, 255, 0.08)'}`,
-                      borderRadius: '16px',
-                      padding: '14px 18px',
-                      backdropFilter: 'blur(12px)',
-                      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)'
-                    }}
-                  >
-                    <div style={{ fontSize: '14px', lineHeight: '1.5', color: '#f1f5f9', whiteSpace: 'pre-wrap' }}>
-                      {msg.text}
-                    </div>
-
-                    {/* Verification Badge */}
-                    {msg.verificationStatus && (
-                      <div style={{
-                        marginTop: '8px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        fontSize: '11px',
-                        color: msg.verificationStatus === 'VERIFIED' ? '#34d399' : '#f87171'
-                      }}>
-                        <span>{msg.verificationStatus === 'VERIFIED' ? '✓ VERIFIED OUTCOME' : '⚠ UNVERIFIED'}</span>
-                        {msg.verificationDetails && (
-                          <span style={{ color: '#64748b' }}>• {msg.verificationDetails}</span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* On-Demand Audio Spoken Output (Listen Button) */}
-                    {msg.sender === 'megh' && (
-                      <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                        <button
-                          onClick={() => handleSpeakMessage(msg.id, msg.text)}
-                          style={{
-                            background: speakingMsgId === msg.id ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                            border: `1px solid ${speakingMsgId === msg.id ? '#ef4444' : 'rgba(255, 255, 255, 0.1)'}`,
-                            color: speakingMsgId === msg.id ? '#fca5a5' : '#38bdf8',
-                            borderRadius: '6px',
-                            padding: '3px 8px',
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                            transition: 'all 0.15s ease'
-                          }}
-                          title={speakingMsgId === msg.id ? 'Stop audio' : 'Speak this response on Windows speakers'}
-                        >
-                          <span>{speakingMsgId === msg.id ? '■ Stop' : '🔊 Listen'}</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* Bottom Floating Command Bar */}
-              <div style={{
-                padding: '16px 32px 24px',
-                display: 'flex',
+                justifyContent: 'center',
                 alignItems: 'center',
-                gap: '12px'
-              }}>
-                <div style={{
-                  flex: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  background: 'rgba(15, 23, 42, 0.85)',
-                  border: '1px solid rgba(255, 255, 255, 0.12)',
-                  borderRadius: '24px',
-                  padding: '8px 18px',
-                  backdropFilter: 'blur(16px)',
-                  boxShadow: '0 10px 25px rgba(0, 0, 0, 0.4)'
-                }}>
-                  <input
-                    type="text"
-                    value={inputText}
-                    onChange={e => setInputText(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') handleSendMessage(inputText);
-                    }}
-                    placeholder="Ask Megh, create a note, daily brief... (Ctrl+Space for Palette)"
-                    style={{
-                      flex: 1,
-                      background: 'transparent',
-                      border: 'none',
-                      outline: 'none',
-                      color: '#f8fafc',
-                      fontSize: '14px',
-                      fontFamily: 'inherit'
-                    }}
-                  />
-                  <button
-                    onClick={() => handleSendMessage(inputText)}
-                    style={{
-                      background: 'linear-gradient(135deg, #00f0ff, #8a2be2)',
-                      border: 'none',
-                      borderRadius: '16px',
-                      color: '#07090e',
-                      padding: '6px 14px',
-                      fontWeight: 700,
-                      fontSize: '12px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Send
-                  </button>
-                </div>
+                padding: '12px 0 0',
+                flexShrink: 0
+              }}
+            >
+              <AICore
+                state={aiState}
+                size={230}
+                micLevel={micLevel}
+                voiceInputState={voiceInputState}
+                personalityStyle={personalityStyle}
+              />
+            </div>
 
-                {/* Quick Palette Button */}
-                <button
-                  onClick={() => setIsCommandPaletteOpen(true)}
-                  style={{
-                    width: '42px',
-                    height: '42px',
-                    borderRadius: '50%',
-                    background: 'rgba(15, 23, 42, 0.85)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    color: '#94a3b8',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    fontSize: '16px'
-                  }}
-                  title="Open Universal Command Palette (Ctrl+Space)"
-                >
-                  ⌘
-                </button>
-              </div>
-            </>
-          )}
+            {/* Editorial Conversation View */}
+            <ChatView
+              messages={messages}
+              speakingMsgId={speakingMsgId}
+              onSpeakMessage={handleSpeakMessage}
+              onSelectPrompt={prompt => handleSendMessage(prompt)}
+            />
 
-          {activeTab === 'notes' && <NotesCenter />}
-          {activeTab === 'tasks' && <TaskCenter />}
-          {activeTab === 'memory' && <MemoryCenter />}
-          {activeTab === 'knowledge' && <KnowledgeCenter />}
-          {activeTab === 'voice' && <VoiceStudio />}
-          {activeTab === 'routines' && <RoutineCenter />}
-          {activeTab === 'providers' && <ProviderCenter />}
-          {activeTab === 'permissions' && <PermissionCenter />}
-        </main>
+            {/* Premium Command Composer */}
+            <Composer
+              value={inputText}
+              onChange={setInputText}
+              onSend={handleSendMessage}
+              selectedModel={selectedModel}
+              onOpenModelSelector={() => setIsModelSelectorOpen(true)}
+              micState={micState}
+              voiceInputState={voiceInputState}
+              micLevel={micLevel}
+              onToggleMic={handleToggleMic}
+              liveTranscript={liveTranscript}
+              onOpenPalette={() => setIsCommandPaletteOpen(true)}
+            />
+          </div>
+        )}
 
-        {/* Right Panel: Action Timeline */}
-        <aside style={{ width: '320px', height: '100%' }}>
-          <ActionTimeline events={events} />
-        </aside>
-      </div>
+        {/* Dedicated Workspace Center Views */}
+        {activeTab === 'notes' && <NotesCenter />}
+        {activeTab === 'tasks' && <TaskCenter />}
+        {activeTab === 'memory' && <MemoryCenter />}
+        {activeTab === 'knowledge' && <KnowledgeCenter />}
+        {activeTab === 'voice' && <VoiceStudio />}
+        {activeTab === 'routines' && <RoutineCenter />}
+        {activeTab === 'providers' && <ProviderCenter />}
+        {activeTab === 'permissions' && <PermissionCenter />}
+      </main>
 
-      {/* Universal Command Palette Modal */}
+      {/* Contextual Action Timeline Drawer */}
+      <ActionTimelineDrawer
+        isOpen={isTimelineOpen}
+        onClose={() => setIsTimelineOpen(false)}
+        events={events}
+      />
+
+      {/* First-Class Model Provider Selector Modal */}
+      <ModelSelectorModal
+        isOpen={isModelSelectorOpen}
+        selectedProvider={selectedModel}
+        onSelectProvider={handleSelectModel}
+        onClose={() => setIsModelSelectorOpen(false)}
+        onOpenProviderCenter={() => setActiveTab('providers')}
+      />
+
+      {/* First-Class Voice Selector Modal */}
+      <VoiceSelectorModal
+        isOpen={isVoiceSelectorOpen}
+        selectedVoiceId={selectedVoiceId}
+        onSelectVoice={handleSelectVoice}
+        onClose={() => setIsVoiceSelectorOpen(false)}
+      />
+
+      {/* First-Class Personality Selector Modal */}
+      <PersonalitySelectorModal
+        isOpen={isPersonalitySelectorOpen}
+        selectedPersonalityId={selectedPersonalityId}
+        onSelectPersonality={profile => {
+          setSelectedPersonalityId(profile.id);
+          setSelectedPersonalityName(profile.name);
+          setPersonalityStyle(profile.visualStyle);
+        }}
+        onClose={() => setIsPersonalitySelectorOpen(false)}
+      />
+
+      {/* Universal Command Palette (Ctrl+Space) */}
       <CommandPalette
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}

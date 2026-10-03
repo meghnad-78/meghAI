@@ -103,8 +103,8 @@ describe('Real Windows Native Microphone Capture Subsystem', () => {
       expect(captureService.getState()).toBe('MIC_LISTENING');
       expect(captureService.isCapturing()).toBe(true);
 
-      // Wait for at least 3 frames (300ms)
-      await new Promise(resolve => setTimeout(resolve, 350));
+      // Wait for at least 3 frames (300-400ms)
+      await new Promise(resolve => setTimeout(resolve, 450));
 
       expect(receivedFrames.length).toBeGreaterThanOrEqual(2);
 

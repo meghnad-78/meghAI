@@ -2,7 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": "./src",
+    "paths": {
+      "@meghai/shared-types": ["../shared-types/dist/index.d.ts"],
+      "@meghai/security": ["../security/dist/index.d.ts"]
+    }
   },
   "include": ["src/**/*"]
 }

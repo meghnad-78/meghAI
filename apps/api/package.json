@@ -18,7 +18,8 @@
     "@meghai/ai-core": "*",
     "@meghai/model-router": "*",
     "@meghai/memory": "*",
-    "@meghai/windows": "*"
+    "@meghai/windows": "*",
+    "@meghai/config": "*"
   },
   "scripts": {
     "build": "tsc",

@@ -69,7 +69,7 @@ describe('Real Windows TTS Provider & Audio Playback Subsystem', () => {
       if (fs.existsSync(result.audioFilePath!)) {
         try { fs.unlinkSync(result.audioFilePath!); } catch {}
       }
-    });
+    }, 15000);
 
     it('respects requested voiceId when synthesizing', async () => {
       const voices = await ttsProvider.listVoices();

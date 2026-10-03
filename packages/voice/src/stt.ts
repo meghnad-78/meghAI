@@ -152,53 +152,46 @@ export class WindowsSpeechSTTProvider implements STTProvider {
   }
 }
 
+import { STTRouter } from './stt-router.js';
+
 /**
- * Speech Recognition Service (Phase 11)
- * Provider-agnostic coordinator for local and cloud speech transcription.
+ * Speech Recognition Service (Online-First)
+ * Provider-agnostic coordinator for online and local speech transcription.
+ * Uses STTRouter for intelligent language detection, keyterm biasing, and failover.
  */
 export class SpeechRecognitionService {
-  private providers: Map<string, STTProvider> = new Map();
-  private defaultProviderId: string = 'windows-system-speech';
+  private router: STTRouter;
 
   constructor(customProviders?: STTProvider[]) {
-    // Default provider: Windows Native System.Speech
-    const windowsProvider = new WindowsSpeechSTTProvider();
-    this.providers.set(windowsProvider.id, windowsProvider);
-
+    this.router = new STTRouter();
     if (customProviders) {
       for (const p of customProviders) {
-        this.providers.set(p.id, p);
+        this.router.registerProvider(p);
       }
     }
   }
 
-  public getProvider(id = this.defaultProviderId): STTProvider | undefined {
-    return this.providers.get(id);
+  public getRouter(): STTRouter {
+    return this.router;
   }
 
-  public listProviders(): Array<{ id: string; name: string; isAvailable: boolean }> {
-    return Array.from(this.providers.values()).map(p => ({
+  public getProvider(id: string): STTProvider | undefined {
+    return this.router.getProvider(id);
+  }
+
+  public listProviders(): Array<{ id: string; name: string; isAvailable: boolean; isConfigured?: boolean }> {
+    return this.router.listProviders().map(p => ({
       id: p.id,
       name: p.name,
-      isAvailable: typeof p.isAvailable === 'function' ? !!p.isAvailable() : true
+      isAvailable: typeof p.isAvailable === 'function' ? !!p.isAvailable() : true,
+      isConfigured: typeof p.isConfigured === 'function' ? p.isConfigured() : true
     }));
   }
 
   public async transcribe(
     audioBuffer: Buffer,
-    options: { providerId?: string; culture?: string; sampleRate?: number } = {}
+    options: { providerId?: string; culture?: string; language?: string; sampleRate?: number; keyterms?: string[] } = {}
   ): Promise<STTResult> {
-    const provId = options.providerId || this.defaultProviderId;
-    const provider = this.providers.get(provId) || this.providers.get(this.defaultProviderId);
-
-    if (!provider) {
-      return {
-        text: '',
-        confidence: 0,
-        isFinal: true
-      };
-    }
-
-    return provider.transcribe(audioBuffer, options);
+    return this.router.transcribe(audioBuffer, options);
   }
 }

@@ -9,6 +9,8 @@ import type {
   TTSProvider
 } from '@meghai/shared-types';
 
+import { writePcmToWavBuffer } from '../audio-preprocessor.js';
+
 /**
  * ElevenLabs High-Fidelity Voice Provider
  * Catalog of authentic ElevenLabs voice models with truthful credentials evaluation.
@@ -18,8 +20,44 @@ export class ElevenLabsTTSProvider implements TTSProvider {
   public readonly name = 'ElevenLabs Generative Voice';
 
   public async listVoices(): Promise<VoiceProfile[]> {
-    const hasKey = Boolean(process.env['ELEVENLABS_API_KEY']);
+    const apiKey = process.env['ELEVENLABS_API_KEY'];
+    const hasKey = Boolean(apiKey && apiKey.trim().length > 0);
     const reason = hasKey ? undefined : 'API key (ELEVENLABS_API_KEY) not configured';
+
+    if (hasKey) {
+      try {
+        const res = await fetch('https://api.elevenlabs.io/v1/voices', {
+          headers: { 'xi-api-key': apiKey! }
+        });
+        if (res.ok) {
+          const data = await res.json() as any;
+          if (Array.isArray(data.voices) && data.voices.length > 0) {
+            return data.voices.map((v: any) => ({
+              id: `eleven-${v.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+              name: `ElevenLabs ${v.name}`,
+              provider: 'elevenlabs' as const,
+              language: v.labels?.accent || 'en-US',
+              gender: v.labels?.gender === 'female' ? 'female' : 'male',
+              naturalness: 'generative' as const,
+              capabilities: {
+                speedSupport: true,
+                pitchSupport: false,
+                emotionSupport: true,
+                styleSupport: true,
+                streamingSupport: true
+              },
+              supportsPreview: true,
+              supportsStreaming: true,
+              tone: v.labels?.description || v.labels?.use_case || 'Authentic expressive voice',
+              style: v.voice_id,
+              isAvailable: true,
+              available: true,
+              requiresApiKey: true
+            }));
+          }
+        }
+      } catch {}
+    }
 
     return this.getElevenLabsCatalog().map(v => ({
       ...v,
@@ -47,11 +85,12 @@ export class ElevenLabsTTSProvider implements TTSProvider {
 
     // Extract elevenlabs model ID from description/mapping or use Rachel default
     const apiVoiceId = voiceProfile.style || '21m00Tcm4TlvDq8ikWAM';
+    const sampleRate = 24000;
 
-    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${apiVoiceId}`, {
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${apiVoiceId}?output_format=pcm_24000`, {
       method: 'POST',
       headers: {
-        'Accept': 'audio/mpeg',
+        'Accept': 'audio/pcm',
         'Content-Type': 'application/json',
         'xi-api-key': apiKey
       },
@@ -71,23 +110,85 @@ export class ElevenLabsTTSProvider implements TTSProvider {
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    const audioBuffer = Buffer.from(arrayBuffer);
-    const audioBase64 = audioBuffer.toString('base64');
+    const rawPcmBuffer = Buffer.from(arrayBuffer);
+    const wavBuffer = writePcmToWavBuffer(rawPcmBuffer, sampleRate, 1);
+    const audioBase64 = wavBuffer.toString('base64');
     const tempPath = path.join(
       os.tmpdir(),
-      `meghai-tts-eleven-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.mp3`
+      `meghai-tts-eleven-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.wav`
     );
-    await fsp.writeFile(tempPath, audioBuffer);
+    await fsp.writeFile(tempPath, wavBuffer);
 
     return {
       audioFilePath: tempPath,
-      audioBuffer,
+      audioBuffer: wavBuffer,
       audioBase64,
-      durationMs: Math.round((audioBuffer.length / 16000) * 1000) || 1000,
-      format: 'mp3',
-      sampleRate: 44100,
+      durationMs: Math.round((rawPcmBuffer.length / (sampleRate * 2)) * 1000) || 1000,
+      format: 'wav',
+      sampleRate,
       voiceId: voiceProfile.id,
       spokenText: cleanText
+    };
+  }
+
+  /**
+   * Stream ElevenLabs audio chunks for ultra-low latency playback (Part 4)
+   */
+  public async synthesizeStream(
+    text: string,
+    options: TTSOptions = {}
+  ): Promise<{ stream: AsyncIterable<Buffer>; voiceId: string; sampleRate: number }> {
+    const apiKey = process.env['ELEVENLABS_API_KEY'];
+    if (!apiKey) {
+      throw new Error('ElevenLabs TTS requires ELEVENLABS_API_KEY to be configured.');
+    }
+
+    const cleanText = (text || '').trim();
+    if (!cleanText) {
+      throw new Error('TTS synthesis text cannot be empty.');
+    }
+
+    const voiceId = options.voiceId || 'eleven-rachel';
+    const catalog = await this.listVoices();
+    const voiceProfile = catalog.find(v => v.id === voiceId) || catalog[0];
+    const apiVoiceId = voiceProfile.style || '21m00Tcm4TlvDq8ikWAM';
+    const sampleRate = 24000;
+
+    const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${apiVoiceId}/stream?output_format=pcm_24000`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/pcm',
+        'Content-Type': 'application/json',
+        'xi-api-key': apiKey
+      },
+      body: JSON.stringify({
+        text: cleanText,
+        model_id: 'eleven_turbo_v2_5',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75
+        }
+      })
+    });
+
+    if (!response.ok || !response.body) {
+      const err = await response.text();
+      throw new Error(`ElevenLabs streaming API error (${response.status}): ${err}`);
+    }
+
+    const reader = response.body.getReader();
+    async function* generateChunks(): AsyncIterable<Buffer> {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) yield Buffer.from(value);
+      }
+    }
+
+    return {
+      stream: generateChunks(),
+      voiceId: voiceProfile.id,
+      sampleRate
     };
   }
 

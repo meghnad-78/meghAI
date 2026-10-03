@@ -37,7 +37,7 @@ export class VoiceActivityDetector {
   constructor(options: VADOptions = {}) {
     this.minSpeechRms = options.minSpeechRms ?? 300;
     this.speechLeadFrames = options.speechLeadFrames ?? 2;
-    this.silenceTimeoutMs = options.silenceTimeoutMs ?? 900;
+    this.silenceTimeoutMs = options.silenceTimeoutMs ?? 2200;
     this.noiseFloorAlpha = options.noiseFloorAlpha ?? 0.05;
     this.thresholdMultiplier = options.thresholdMultiplier ?? 2.5;
     this.onSpeechStart = options.onSpeechStart;

@@ -122,6 +122,8 @@ export interface ModelResponse {
     }>;
     latencyMs: number;
     finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error';
+    fallbackOccurred?: boolean;
+    fallbackReason?: string;
 }
 export interface ModelStreamChunk {
     delta: string;
@@ -221,7 +223,7 @@ export interface WorkspaceEntry {
     createdAt: string;
     updatedAt: string;
 }
-export type EventType = 'USER_INPUT_RECEIVED' | 'WAKE_DETECTED' | 'MIC_STARTING' | 'MIC_READY' | 'MIC_LISTENING' | 'MIC_LEVEL' | 'MIC_STOPPING' | 'MIC_OFF' | 'MIC_DEVICE_UNAVAILABLE' | 'STT_STARTED' | 'STT_COMPLETED' | 'TTS_REQUESTED' | 'TTS_STARTED' | 'TTS_AUDIO_READY' | 'AUDIO_PLAYBACK_STARTED' | 'SPEAKING' | 'AUDIO_PLAYBACK_COMPLETED' | 'TTS_COMPLETED' | 'TTS_FAILED' | 'AUDIO_PLAYBACK_FAILED' | 'TTS_INTERRUPTED' | 'AUDIO_CUE_STARTED' | 'AUDIO_CUE_COMPLETED' | 'AUDIO_STATE_CHANGED' | 'VOICE_ERROR' | 'INTERRUPTED' | 'LANGUAGE_DETECTED' | 'INTENT_CLASSIFIED' | 'CONTEXT_RETRIEVED' | 'MEMORY_RETRIEVED' | 'PLAN_CREATED' | 'MODEL_SELECTED' | 'MODEL_STARTED' | 'MODEL_CHUNK' | 'MODEL_COMPLETED' | 'TOOL_REQUESTED' | 'TOOL_APPROVAL_REQUIRED' | 'TOOL_STARTED' | 'TOOL_COMPLETED' | 'VERIFICATION_STARTED' | 'VERIFICATION_COMPLETED' | 'TASK_COMPLETED' | 'TASK_FAILED' | 'TASK_CANCELLED' | 'KILL_SWITCH_ACTIVATED' | 'MEMORY_COMMAND_DETECTED' | 'MEMORY_CANDIDATE_CREATED' | 'MEMORY_PROMOTED' | 'MEMORY_STORED' | 'MEMORY_DELETED' | 'ROUTINE_TRIGGERED' | 'AI_STATE_CHANGED';
+export type EventType = 'USER_INPUT_RECEIVED' | 'WAKE_DETECTED' | 'MIC_STARTING' | 'MIC_READY' | 'MIC_LISTENING' | 'MIC_LEVEL' | 'MIC_STOPPING' | 'MIC_OFF' | 'MIC_ERROR' | 'MIC_DEVICE_UNAVAILABLE' | 'VAD_SPEECH_STARTED' | 'VAD_SPEECH_ENDED' | 'VOICE_INPUT_STATE_CHANGED' | 'VOICE_COMMAND_RECEIVED' | 'VOICE_TRANSCRIBING' | 'TRANSCRIPT_PARTIAL' | 'TRANSCRIPT_FINAL' | 'STT_STARTED' | 'STT_COMPLETED' | 'TTS_REQUESTED' | 'TTS_STARTED' | 'TTS_AUDIO_READY' | 'AUDIO_PLAYBACK_STARTED' | 'SPEAKING' | 'AUDIO_PLAYBACK_COMPLETED' | 'TTS_COMPLETED' | 'TTS_FAILED' | 'AUDIO_PLAYBACK_FAILED' | 'TTS_INTERRUPTED' | 'AUDIO_CUE_STARTED' | 'AUDIO_CUE_COMPLETED' | 'AUDIO_STATE_CHANGED' | 'VOICE_ERROR' | 'INTERRUPTED' | 'LANGUAGE_DETECTED' | 'INTENT_CLASSIFIED' | 'CONTEXT_RETRIEVED' | 'MEMORY_RETRIEVED' | 'PLAN_CREATED' | 'MODEL_SELECTED' | 'MODEL_STARTED' | 'MODEL_CHUNK' | 'MODEL_FALLBACK' | 'MODEL_COMPLETED' | 'TOOL_REQUESTED' | 'TOOL_APPROVAL_REQUIRED' | 'TOOL_STARTED' | 'TOOL_COMPLETED' | 'VERIFICATION_STARTED' | 'VERIFICATION_COMPLETED' | 'TASK_COMPLETED' | 'TASK_FAILED' | 'TASK_CANCELLED' | 'KILL_SWITCH_ACTIVATED' | 'MEMORY_COMMAND_DETECTED' | 'MEMORY_CANDIDATE_CREATED' | 'MEMORY_PROMOTED' | 'MEMORY_STORED' | 'MEMORY_DELETED' | 'ROUTINE_TRIGGERED' | 'AI_STATE_CHANGED';
 export interface MeghAIEvent<T = unknown> {
     id: string;
     type: EventType;
@@ -231,7 +233,7 @@ export interface MeghAIEvent<T = unknown> {
     source: string;
 }
 export type PersonalityMode = 'PROFESSIONAL' | 'WARM' | 'FUTURISTIC_COMPANION' | 'CALM_ASSISTANT';
-export type VoiceProviderId = 'windows-sapi' | 'windows-onecore' | 'google-cloud' | 'elevenlabs' | 'local-offline' | 'local' | 'google';
+export type VoiceProviderId = 'windows-sapi' | 'windows-onecore' | 'google-cloud' | 'elevenlabs' | 'openai' | 'local-offline' | 'local' | 'google';
 export interface VoiceCapability {
     speedSupport: boolean;
     pitchSupport: boolean;
@@ -333,6 +335,98 @@ export interface AudioCaptureDiagnostics {
     activeDevice: string;
     isLive: boolean;
     state: MicrophoneState;
+}
+export type VADState = 'SILENCE' | 'SPEECH';
+export interface VADFrameResult {
+    isSpeech: boolean;
+    state: VADState;
+    speechDurationMs: number;
+    silenceDurationMs: number;
+    rms: number;
+    threshold: number;
+}
+export type VoiceInputState = 'IDLE' | 'PASSIVE_WAKE_LISTENING' | 'WAKE_CONFIRMED' | 'COMMAND_CAPTURE' | 'TRANSCRIBING' | 'PROCESSING' | 'SPEAKING' | 'ERROR';
+export type OnlineSystemStatus = 'ONLINE' | 'ONLINE_DEGRADED' | 'CONNECTING' | 'DEGRADED' | 'PROVIDER_ERROR' | 'NO_CREDENTIALS' | 'RATE_LIMITED' | 'NETWORK_UNAVAILABLE';
+export type STTQualityMode = 'REALTIME' | 'BALANCED' | 'HIGH_ACCURACY';
+export interface STTWordTiming {
+    word: string;
+    startMs: number;
+    endMs: number;
+    confidence?: number;
+}
+export interface STTResult {
+    text: string;
+    confidence: number;
+    culture?: string;
+    language?: string;
+    detectedLanguage?: string;
+    languageMetadata?: {
+        code: string;
+        name?: string;
+        isCodeSwitched?: boolean;
+        confidence?: number;
+    };
+    timestamps?: STTWordTiming[];
+    durationMs?: number;
+    providerId?: string;
+    modelId?: string;
+    isFinal: boolean;
+    rawText?: string;
+    interpretedText?: string;
+}
+export interface STTCapabilities {
+    supportsRealtime: boolean;
+    supportsKeytermBiasing: boolean;
+    supportsLanguageDetection: boolean;
+    supportsCodeSwitching: boolean;
+    supportedAudioEncodings: string[];
+    languages: string[];
+    models: string[];
+}
+export interface STTOptions {
+    culture?: string;
+    language?: string;
+    sampleRate?: number;
+    keyterms?: string[];
+    qualityMode?: STTQualityMode;
+    enableCodeSwitching?: boolean;
+    stream?: boolean;
+    providerId?: string;
+    modelId?: string;
+}
+export interface STTProviderHealth {
+    available: boolean;
+    latencyMs: number;
+    isConfigured: boolean;
+    message?: string;
+    lastChecked?: string;
+}
+export interface STTProvider {
+    readonly id: string;
+    readonly name: string;
+    initialize?(): Promise<void>;
+    transcribe(audioBuffer: Buffer, options?: STTOptions): Promise<STTResult>;
+    transcribeRealtime?(audioStream: AsyncIterable<Buffer>, onPartial: (partial: STTResult) => void, options?: STTOptions): Promise<STTResult>;
+    getLanguages?(): string[];
+    getCapabilities?(): STTCapabilities;
+    healthCheck?(): Promise<STTProviderHealth>;
+    isAvailable(): Promise<boolean> | boolean;
+    isConfigured?(): boolean;
+}
+export interface STTRoutingDecision {
+    selectedProvider: string;
+    modelId?: string;
+    reason: string;
+    qualityMode: STTQualityMode;
+    fallbackChain: string[];
+    language?: string;
+    keytermsApplied?: string[];
+}
+export interface WakeWordResult {
+    detected: boolean;
+    phrase?: string;
+    confidence?: number;
+    rawText?: string;
 }
 export interface RoutineEntry {
     id: string;

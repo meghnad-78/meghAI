@@ -167,3 +167,20 @@ export class WakeWordDetector {
     return { isTriggered: false, cleanedText: trimmed };
   }
 }
+
+/**
+ * Deterministically strips wake phrase prefixes ("Hey Megh", "Megh", "Hey Mag", etc.)
+ * from transcripts while preserving the user's actual command (Section 12).
+ */
+export function stripWakePhrase(rawText: string): { cleaned: string; raw: string; wakeStripped: boolean } {
+  const trimmed = (rawText || '').trim();
+  if (!trimmed) return { cleaned: '', raw: '', wakeStripped: false };
+  const wakeRegex = /^(?:(?:hey|hi|hello|ok|okay)\s+)?(?:megh|meg|mag|meghai)\b[\s,:\.\?!-]*/i;
+  const match = trimmed.match(wakeRegex);
+  if (match) {
+    const stripped = trimmed.slice(match[0].length).trim();
+    return { cleaned: stripped, raw: trimmed, wakeStripped: true };
+  }
+  return { cleaned: trimmed, raw: trimmed, wakeStripped: false };
+}
+

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -66,6 +66,14 @@ describe('MeghAI Voice Input Subsystem & Chat Recovery', () => {
     it('successfully processes normal typed chat without recursion or stack overflow', async () => {
       const server = new MeghAIServer(tempDir);
       server.voiceSettings.updateSettings({ autoSpeak: 'OFF' });
+      vi.spyOn(server.modelRouter, 'completeWithFallback').mockResolvedValue({
+        content: '2 + 2 = 4',
+        providerId: 'gemini',
+        modelId: 'gemini-2.5-flash',
+        tokensUsed: { totalTokens: 10, promptTokens: 4, completionTokens: 6 },
+        latencyMs: 100,
+        finishReason: 'stop'
+      });
 
       const res = await server.processUserRequest('Hello, what is 2+2?');
       expect(res).toBeDefined();
@@ -78,22 +86,40 @@ describe('MeghAI Voice Input Subsystem & Chat Recovery', () => {
     it('processes user greeting and produces genuine response', async () => {
       const server = new MeghAIServer(tempDir);
       server.voiceSettings.updateSettings({ autoSpeak: 'OFF' });
+      vi.spyOn(server.modelRouter, 'completeWithFallback').mockResolvedValue({
+        content: 'Hello! How can I help you today?',
+        providerId: 'gemini',
+        modelId: 'gemini-2.5-flash',
+        tokensUsed: { totalTokens: 12, promptTokens: 2, completionTokens: 10 },
+        latencyMs: 100,
+        finishReason: 'stop'
+      });
 
       const res = await server.processUserRequest('Hello');
       expect(res).toBeDefined();
       expect(res.status).toBe('COMPLETED');
       expect(typeof res.reply).toBe('string');
       expect((res.reply as string).length).toBeGreaterThan(0);
+      expect(res.reply).not.toContain('Maximum call stack size exceeded');
     }, 20000);
 
     it('functions seamlessly with AutoSpeak ON without blocking chat return', async () => {
       const server = new MeghAIServer(tempDir);
       server.voiceSettings.updateSettings({ autoSpeak: 'ON' });
+      vi.spyOn(server.modelRouter, 'completeWithFallback').mockResolvedValue({
+        content: 'Hello',
+        providerId: 'gemini',
+        modelId: 'gemini-2.5-flash',
+        tokensUsed: { totalTokens: 5, promptTokens: 3, completionTokens: 2 },
+        latencyMs: 100,
+        finishReason: 'stop'
+      });
 
       const res = await server.processUserRequest('Say hello in one word');
       expect(res).toBeDefined();
       expect(res.status).toBe('COMPLETED');
       expect(typeof res.reply).toBe('string');
+      expect(res.reply).not.toContain('Maximum call stack size exceeded');
     }, 20000);
   });
 

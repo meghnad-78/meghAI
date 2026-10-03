@@ -15,6 +15,7 @@ describe('MeghAI Phase 2 API Server Endpoints & Orchestration', () => {
     await fs.mkdir(tempDir, { recursive: true });
 
     server = new MeghAIServer(tempDir);
+    await server.voiceSettings.updateSettings({ autoSpeak: 'OFF' });
     testPort = await server.start(0); // 0 lets OS assign an ephemeral available port
     baseUrl = `http://localhost:${testPort}`;
   });
@@ -171,4 +172,19 @@ describe('MeghAI Phase 2 API Server Endpoints & Orchestration', () => {
     expect(data.reply).toContain('Upcoming Schedule:');
     expect(data.reply).toContain('System Health:');
   });
+
+  it('POST /api/v1/voice/test should execute diagnostic self-test and return metrics', async () => {
+    const res = await fetch(`${baseUrl}/api/v1/voice/test`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voiceId: 'onecore-heera', text: 'Diagnostic audio test.', play: false })
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json() as any;
+    expect(data.success).toBe(true);
+    expect(data.voice).toBeDefined();
+    expect(data.provider).toBeDefined();
+    expect(data.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(data.durationMs).toBeGreaterThanOrEqual(0);
+  }, 15000);
 });

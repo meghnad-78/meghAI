@@ -503,6 +503,421 @@ Prior to this milestone, MeghAI's microphone input was mock/UI-only:
    - TEST 6 (STT $\rightarrow$ Pipeline Integration): Transcribed text executed through `processUserRequest` producing genuine Llama 3.2 response: "Two plus two is four."
    - TEST 7 (Kill Switch): Immediate termination of all audio and voice pipelines.
 
+---
+
+### Critical Milestone: Online-First Production Architecture & Multi-Cloud Voice/AI Transition (VERIFIED)
+
+#### Architectural Motivation & Strategic Shift
+- Replaced offline-first default assumptions with an **ONLINE-FIRST / CLOUD-FIRST** personal AI architecture.
+- Local Ollama and Windows `DictationGrammar` are now reserved strictly as explicit user choices or test fallbacks, eliminating synthetic fake text and ensuring genuine cloud AI capabilities.
+- Added support for leading online speech recognition providers, intelligent multi-factor auto-routing, transparent colloquial transcript normalization, self-wake echo suppression, OpenAI Speech expansion, BYOK credential management, and dynamic truthful system status reporting.
+
+#### Architecture Components Implemented
+1. **Audio Preprocessing & Formatting (`packages/voice/src/audio-preprocessor.ts`)**:
+   - Validates audio streams to guarantee 16kHz mono 16-bit signed PCM parameters.
+   - Computes RMS, peak amplitude, clipping ratio, and estimated SNR (dB) without destroying natural speech phonemes.
+   - Trims silence while preserving 100ms consonant lead/trail buffers.
+   - Constructs standard 44-byte RIFF WAVE buffers for compatibility with cloud REST and WebSocket STT endpoints.
+2. **Multi-Provider Online Speech-to-Text Engines (`packages/voice/src/providers/`)**:
+   - `ElevenLabsSTTProvider`: Direct integration with ElevenLabs Scribe v2 API (`https://api.elevenlabs.io/v1/speech-to-text`), returning high-accuracy transcriptions with word timestamps and language tags.
+   - `GoogleCloudSTTProvider`: Dual-mode engine supporting Google Cloud Speech-to-Text v1/Chirp and Gemini 2.5 Flash multimodal transcription (`gemini-2.5-flash:generateContent`) with native Indic (Hindi, Bengali, Hinglish) code-switching and context phrase biasing.
+   - `OpenAIWhisperSTTProvider`: OpenAI Whisper-1 transcription API (`https://api.openai.com/v1/audio/transcriptions`) with context keyterms biasing.
+3. **Intelligent STT Router (`packages/voice/src/stt-router.ts`)**:
+   - Evaluates language, quality mode (`REALTIME`, `BALANCED`, `HIGH_ACCURACY`), provider configuration/health, and keyterms.
+   - Routes Indic queries (Hindi, Bengali, Hinglish) to Google Cloud STT or ElevenLabs Scribe.
+   - Routes `HIGH_ACCURACY` mode to ElevenLabs Scribe or OpenAI Whisper.
+   - Implements failover across online providers before falling back to local Windows speech recognition.
+   - Implements lightweight transparent normalization (`rawText` vs `interpretedText`) stripping polite/colloquial prefixes while preserving original user words.
+4. **Self-Wake Echo Suppression (`packages/voice/src/voice-input-manager.ts`)**:
+   - Inspects `this.state === 'SPEAKING'` and `this.audioOutput.isPlaying()`.
+   - While MeghAI is actively speaking or playing audio cues through the Windows speaker, incoming microphone frames are immediately discarded and rolling wake buffers are flushed.
+   - Completely prevents self-wake feedback loops where MeghAI's own voice triggers wake word detection.
+5. **Online-First Model Router & Failover (`packages/model-router/src/index.ts`)**:
+   - Implements `completeWithFallback(request, options)` across configured online providers (Gemini, OpenAI, Anthropic Claude, DeepSeek, Grok, Perplexity).
+   - If no online provider has a valid API key configured and offline fallback is disallowed, truthfully reports `NO_ONLINE_MODEL_CONFIGURED` without generating synthetic fake responses.
+   - Emits `MODEL_FALLBACK` events with source provider and failover reason to the event bus.
+   - Integrates with `ObservabilityService.recordTokenUsage` to track real USD and INR token costs.
+6. **Multi-Voice Catalog Expansion & OpenAI Speech (`packages/voice/src/catalog.ts`, `packages/voice/src/providers/openai-tts-provider.ts`)**:
+   - Added `OpenAITTSProvider` supporting 6 high-naturalness voices: Alloy, Echo, Fable, Onyx, Nova, and Shimmer.
+   - Aggregates 107 voices across Windows SAPI, Windows OneCore, Google Cloud, ElevenLabs, and OpenAI.
+7. **BYOK Credential Management & Dynamic Online Status (`packages/config/src/index.ts`, `apps/api/src/server.ts`, `apps/desktop/src/components/TopHUD.tsx`)**:
+   - Persists API keys entered in `ProviderCenter` into `~/.meghai/credentials.json` via `POST /api/v1/providers/keys`.
+   - Hydrates `process.env` immediately upon key submission.
+   - Added `GET /api/v1/providers/diagnostics` exposing live connectivity, latency, and configuration status.
+   - Added dynamic `onlineStatus` (`ONLINE`, `ONLINE_DEGRADED`, `NO_CREDENTIALS`, `NETWORK_UNAVAILABLE`) to `GET /api/v1/system/status` and TopHUD.
+
+#### Verification & Live Testing
+1. **Unit Test Suite (`tests/unit/online-first-architecture.test.ts`)**:
+   - 13 / 13 tests passing (32ms):
+     - Audio format validation, metrics calculation, and RIFF WAV generation.
+     - STTRouter Indic language routing and high-accuracy routing.
+     - STTRouter failover chain and transparent transcript normalization.
+     - Echo suppression discarding frames during active playback.
+     - Truthful `NO_ONLINE_MODEL_CONFIGURED` reporting without fake text.
+     - Cross-provider online model fallback.
+     - OpenAI Speech catalog registration and BYOK credential disk persistence.
+2. **Live System Verification (`scripts/verify-online-pipeline.ts`)**:
+   - 18 / 18 verification checks passing:
+     - Parameter validation (16kHz mono 16-bit PCM accepted, stereo rejected).
+     - Acoustic metrics (RMS, peak, SNR) verified without speech degradation.
+     - RIFF WAV header verified.
+     - Online STT engines registered (ElevenLabs, Google, OpenAI).
+     - Truthful unconfigured STT fallback reported.
+     - Indic language routing verified.
+     - Quality mode routing verified.
+     - Transparent transcript normalization verified for English and Hinglish.
+     - Self-wake echo suppression verified.
+     - Multi-voice catalog verified (107 voices, 96 cloud, 11 offline ready).
+     - Truthful `NO_ONLINE_MODEL_CONFIGURED` verified.
+     - Cross-provider failover verified.
+     - BYOK credential persistence verified.
+
+---
+
+## 2026-10-03: Gemini BYOK Key Recognition & Dynamic Health Verification (REQ-038)
+
+### Root Cause Analysis
+1. **Missing Startup Hydration**: `loadConfig()` was not invoked in `apps/api/src/server.ts` constructor or `index.ts`. Therefore, on server startup, credentials saved in `~/.meghai/credentials.json` were never hydrated into `process.env`.
+2. **Stale In-Memory Provider Caching**: `GeminiProvider` in `packages/model-router/src/index.ts` read `process.env['GEMINI_API_KEY']` once at construction time. When `POST /api/v1/providers/keys` saved a key, `ModelRouter` was never notified, leaving the active provider unconfigured in memory.
+3. **Lack of Dynamic Credential Resolution & Precedence**: `GeminiProvider` did not implement dynamic precedence (`GOOGLE_API_KEY` taking precedence over `GEMINI_API_KEY`, with fallback to instance key).
+4. **Mocked Health Check**: `GeminiProvider.checkHealth()` returned a hardcoded mock object instead of executing a lightweight query against Google's API (`GET https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`).
+5. **Frontend Property Mismatch in ProviderCenter**: `ProviderCenter.tsx` checked `p.health?.isHealthy` instead of `p.health?.available`, causing all healthy models to display `OFFLINE / UNCONFIGURED`.
+
+### Solution Architecture
+1. **`packages/config/src/index.ts`**:
+   - `saveProviderCredential(providerId, apiKey)` calls `hydrateEnvWithKey` with `force = true` to override existing keys immediately.
+   - `loadConfig()` hydrates `process.env` from `~/.meghai/credentials.json` on startup.
+   - Canonical precedence: `GOOGLE_API_KEY` takes precedence over `GEMINI_API_KEY`.
+2. **`packages/model-router/src/index.ts`**:
+   - `GeminiProvider.getApiKey()` dynamically evaluates:
+     1. Explicit in-memory key (`setApiKey`)
+     2. `process.env.GOOGLE_API_KEY`
+     3. `process.env.GEMINI_API_KEY`
+   - Real, lightweight `checkHealth()` pinging `GET https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}` with 5000ms timeout and distinct error classification:
+     - `CONFIGURED_HEALTHY`
+     - `AUTHENTICATION_FAILED` (400, 401, 403)
+     - `RATE_LIMITED` (429)
+     - `PROVIDER_UNREACHABLE` (5xx or network/timeout)
+     - `NO_CREDENTIAL`
+   - Added `ModelRouter.updateProviderKey(providerId, apiKey)` for zero-restart in-memory provider updates.
+3. **`apps/api/src/server.ts`**:
+   - `MeghAIServer` constructor calls `loadConfig()` on boot.
+   - `POST /api/v1/providers/keys` calls `this.modelRouter.updateProviderKey(body.providerId, body.apiKey)`.
+   - Both `/api/v1/system/status` and `/api/v1/providers/diagnostics` query the same single source of truth.
+4. **`apps/desktop/src/components/ProviderCenter.tsx`**:
+   - Updated `isHealthy` logic: `Boolean(p.health?.isHealthy ?? p.health?.available)`.
+   - Updated badge rendering to show exact status (`● HEALTHY`, `⚠ AUTH FAILED`, `⚠ RATE LIMITED`, `✕ UNREACHABLE`, `○ OFFLINE / UNCONFIGURED`).
+   - Detailed status line displays `p.isConfigured ? 'Configured (Active)' : 'Requires BYOK API Key'` alongside real API diagnostics message.
+
+### Verification (`scripts/verify-gemini-byok.ts`)
+- Server boot hydration verified without requiring re-entry.
+- Real Gemini health check successfully verifies key against Google's API with truthful error classification (`AUTHENTICATION_FAILED` with exact API error message).
+- Both `/api/v1/system/status` and `/api/v1/providers/diagnostics` report identical truthful status.
+- Dynamic key update via `POST /api/v1/providers/keys` takes effect in memory immediately without restarting.
+- Key precedence rule verified: `GOOGLE_API_KEY` takes precedence over `GEMINI_API_KEY`.
+- 100% clean typecheck and test pass across all project workspaces.
+
+---
+
+## 2026-10-03: Model Routing Disentanglement, Fallback Transparency & Credential Hygiene (REQ-039)
+
+### Problem Statement & Live Evidence
+A critical routing inconsistency occurred when sending normal chat requests:
+```text
+Error communicating with model provider (gemini):
+OpenAI completion failed:
+OpenAI HTTP 401:
+Incorrect API key provided:
+sk-test-************trial
+```
+Even though the request was addressed to provider `gemini`, an OpenAI completion path executed and threw a 401 error.
+
+### Root Cause Analysis
+1. **Gemini Model Deprecation / Mismatch (Primary Trigger)**:
+   - `GeminiProvider` defaulted to `gemini-2.5-flash`.
+   - Google's Generative Language API deprecated `gemini-2.5-flash` for new users (`HTTP 404: This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash`).
+2. **Leaked Test Credential in Production Disk Storage**:
+   - `tests/unit/online-first-architecture.test.ts` previously invoked `saveProviderCredential('openai', 'sk-test-openai-credential', credsPath)`.
+   - `saveProviderCredential` unconditionally called `hydrateEnvWithKey` regardless of `customPath`.
+   - Additionally, `openai: "sk-test-openai-credential"` was stored in `~/.meghai/credentials.json`.
+   - OpenAI's error masking formatted the key as `sk-test-` (first 8 chars) + `************` + `trial` (last 5 chars of `credential`), creating `sk-test-************trial`.
+3. **Mocked OpenAI Health Check Leading to False HEALTHY Reporting**:
+   - `OpenAIProvider.checkHealth()` had a mocked return: `{ available: true, latencyMs: 110, isConfigured: true }`, never testing authentication against OpenAI's API.
+   - Provider Center and Server Diagnostics falsely marked OpenAI as `HEALTHY`.
+4. **Silent Cross-Provider Fallback Masking Primary Failure**:
+   - When `gemini` failed on `gemini-2.5-flash` (404), `ModelRouter.completeWithFallback()` failed over to `openai` (falsely listed as configured).
+   - When `openai` failed (401), `completeWithFallback()` rethrew only the last error (`openai`), masking the primary `gemini` failure.
+   - `server.ts` caught the error and prefixed it with `(routeDecision.selectedProvider)` which was `gemini`, falsely attributing the OpenAI error to Gemini.
+
+### Solution Architecture
+1. **Model Upgrades & System Instructions (`packages/model-router/src/index.ts`)**:
+   - Updated `GeminiProvider` primary default model to `gemini-3.8-flash`.
+   - Supported models: `gemini-3.8-flash`, `gemini-flash-latest`, and `gemini-3.1-pro-preview`.
+   - Added `systemInstruction` support complying with Google Gemini REST API specifications.
+   - Added transient demand failover across flash models (`gemini-3.8-flash` $\leftrightarrow$ `gemini-flash-latest`) handling temporary Google 503 load spikes.
+2. **Real OpenAI Health Check (`packages/model-router/src/index.ts`)**:
+   - Implemented real verification in `OpenAIProvider.checkHealth()` querying `GET https://api.openai.com/v1/models` with Bearer auth and 5000ms timeout.
+   - Accurately classifies status into `CONFIGURED_HEALTHY`, `AUTHENTICATION_FAILED` (401/403), `RATE_LIMITED` (429), `PROVIDER_UNREACHABLE` (5xx/timeout), and `NO_CREDENTIAL`.
+3. **Strict Credential Hygiene (`packages/config/src/index.ts`)**:
+   - Added `isTestOrDummyCredential(key)` to detect and reject mock fixtures (`sk-test-`, `test-`, `dummy`, `mock-key`) from being treated as configured or hydrated in production runtime.
+   - `saveProviderCredential` only hydrates `process.env` when `!customPath && process.env.NODE_ENV !== 'test'`.
+   - Added `removeProviderCredential(providerId)` helper.
+   - Cleaned up the leaked test fixture `openai: "sk-test-openai-credential"` from `~/.meghai/credentials.json` while strictly preserving the user's valid `gemini` and `elevenlabs` credentials.
+4. **Transparent Cross-Provider Fallback Attribution (`packages/model-router/src/index.ts`, `apps/api/src/server.ts`)**:
+   - `completeWithFallback` tracks all candidate attempt errors.
+   - If multiple candidates fail, errors are aggregated: `All candidate providers failed: [gemini]: ...; [openai]: ...`.
+   - `server.ts` error formatting truthfully attributes errors without mislabeling fallback failures as primary provider errors.
+
+### Verification (`scripts/verify-routing-bugfix.ts`, `scripts/verify-server-chat.ts`, `scripts/verify-server-diagnostics.ts`)
+- `GeminiProvider`: `isConfigured() = true`, `checkHealth()` = `CONFIGURED_HEALTHY` (535ms), live completion succeeded with `GEMINI_ROUTING_VERIFIED`, zero OpenAI involvement.
+- `OpenAIProvider`: `isConfigured() = false`, `checkHealth()` = `NO_CREDENTIAL` ("OpenAI API key is not configured.").
+- `ModelRouter`: Auto-routes to `gemini` (`gemini-3.8-flash`), empty fallback chain, `fallbackOccurred = false`.
+- `MeghAIServer`: `POST /api/v1/input/process` chat response completed with status `COMPLETED`, reply text generated, provider `gemini`.
+- `GET /api/v1/providers/diagnostics`: Gemini `HEALTHY`, OpenAI `NO_CREDENTIAL`, system status `ONLINE`.
+- 100% clean typecheck (`npm run typecheck`) and build pass (`npm run build`).
+
+---
+
+## 2026-10-03: Critical Voice Pipeline Fix — Final Transcript, Single Model Answer, Idempotency Deduplication, Echo Suppression & HTTP 429 Quota Resilience (REQ-040)
+
+### Problem Statement & Live Symptoms
+1. **No Assistant Response on Spoken Input**:
+   - Spoken audio commands captured by microphone and transcribed by online STT created a user chat bubble in the UI, but never produced an assistant answer.
+2. **Duplicate Chat Bubbles & Multi-Submission Storms**:
+   - Partial transcripts (`TRANSCRIPT_PARTIAL`) or rapid intermediate audio segments triggered duplicate submissions and multiple chat bubbles in the UI.
+   - Microphone picked up Windows speaker playback (self-wake audio loop), triggering repeated wake word detections and cascaded model requests.
+3. **Google Gemini HTTP 429 Rate Limiting**:
+   - Cascaded requests quickly exhausted Google Gemini per-minute quotas.
+   - When Gemini returned HTTP 429, retry loops exacerbated the quota exhaustion, and the UI showed no response because `TASK_FAILED` was unhandled by the desktop event listener.
+
+### Root Cause Analysis
+1. **UI Event Drop on Provider Error**:
+   - `App.tsx` only listened for `TASK_COMPLETED` over Server-Sent Events (`/api/v1/events`).
+   - When Gemini hit 429 rate limits, `server.ts` emitted `TASK_FAILED`. Because `App.tsx` had no listener for `TASK_FAILED`, the error was completely swallowed in the UI, leaving the user with an unanswered message.
+2. **Missing Voice Session and Command Correlation**:
+   - `VoiceInputManager` emitted `TRANSCRIPT_FINAL` without stable session identifiers (`voiceSessionId`, `commandId`).
+   - `App.tsx` used `Date.now()` to create bubble keys on every transcript event, causing identical or duplicate transcripts to spawn separate UI bubbles.
+3. **Unawaited Speech Output Triggering Immediate Self-Wake Loop**:
+   - In `apps/api/src/server.ts`, `speakResponse` was called without `await`.
+   - `voiceInput.onCommand` returned immediately while the speaker was still playing the chime and TTS answer.
+   - `VoiceInputManager` immediately resumed `PASSIVE_WAKE_LISTENING`.
+   - The microphone captured the assistant's own voice speaking through the speakers, triggering VAD and wake detection repeatedly in a runaway feedback loop.
+4. **Retry Loop on HTTP 429**:
+   - `GeminiProvider.complete` attempted multiple models (`gemini-3.8-flash`, `gemini-flash-latest`, `gemini-3.1-pro-preview`) sequentially even when the first returned HTTP 429, multiplying quota exhaustion requests.
+
+### Solution Architecture
+1. **Isolated Partial Transcripts (`packages/voice/src/voice-input-manager.ts`, `apps/desktop/src/App.tsx`)**:
+   - Partial transcripts (`TRANSCRIPT_PARTIAL`) are treated strictly as ephemeral preview telemetry.
+   - In `App.tsx`, `TRANSCRIPT_PARTIAL` only updates the subtle floating `liveTranscript` chip above the command bar; it never appends to `messages`, never invokes the model, and never triggers TTS.
+2. **Strict Session & Command Idempotency Gating**:
+   - Added `VoiceCommandMeta` with `voiceSessionId` (UUID v4) and `commandId` (UUID v4) generated at wake confirmation (`WAKE_CONFIRMED`).
+   - `VoiceInputManager` maintains an in-memory Set of processed command hashes (`${voiceSessionId}:${commandId}:${transcriptHash}`). Duplicate or stale transcript calls are dropped before invoking `commandHandler`.
+   - `server.ts` maintains a bounded LRU deduplication Set (`processedVoiceCommands`) preventing double-dispatch to `processUserRequest`.
+   - `processUserRequest` accepts `meta?: { voiceSessionId?: string; commandId?: string; source?: 'VOICE' | 'TEXT' }` and propagates correlation tags to `TASK_COMPLETED` and `TASK_FAILED`.
+3. **Self-Wake Acoustic Echo Suppression**:
+   - In `VoiceInputManager.handleAudioFrame`, all audio frames are discarded immediately if:
+     - `this.state === 'SPEAKING'`,
+     - `this.audioOutput.isPlaying()`, or
+     - Current time is within the 500ms post-playback echo cooldown window (`this.echoCooldownUntil`).
+   - `server.ts` `await`s `this.speakResponse()` before returning control, guaranteeing audio output is fully completed before wake listening re-activates.
+4. **Fast-Fail HTTP 429 Detection & Quota Protection (`packages/model-router/src/index.ts`)**:
+   - In `GeminiProvider.complete`, HTTP 429 responses are flagged immediately with `isRateLimit = true`, `status = 429`.
+   - The model retry loop instantly breaks (`break`) instead of hitting alternate Gemini models, stopping request storms.
+5. **Resilient Desktop UI Telemetry & Feedback (`apps/desktop/src/App.tsx`)**:
+   - Added handlers for `TASK_FAILED` and `VOICE_MODEL_RATE_LIMITED` over SSE.
+   - When an error occurs (such as Gemini 429 rate limit), the assistant's explanation bubble is immediately displayed in chat with clear guidance.
+   - Floating `liveTranscript` preview is cleanly dismissed on completion or error.
+   - User message bubbles are deduplicated by `msgId` and text content.
+
+### Verification
+- **Unit Test Coverage**:
+  - `tests/unit/voice-pipeline-idempotency.test.ts`: 6 dedicated unit tests covering partial transcript non-execution, session ID generation, idempotency deduplication, self-wake echo suppression, server-side deduplication, 429 quota exhaustion handling, and GeminiProvider fast-fail.
+  - `tests/unit/voice-input-subsystem.test.ts`: 14 tests passing.
+  - Full test suite: **33 test files passing, 198 tests passing (100% pass rate)**.
+- **Type Safety**: Clean compilation with `npm run typecheck` across all packages and apps (0 errors).
+
+---
+
+## 2026-10-03: Complete Product-Grade UI/UX Redesign & Master Model Provider Control (REQ-041)
+
+### Problem Statement & Architectural Motivation
+While previous iterations established robust foundational mechanics (online STT, Gemini multi-model routing, Windows acoustic capture, native TTS, Risk Engine, and Task Planner), the visual interface still bore the hallmarks of a developer prototype:
+1. Cluttered top HUD with raw badge dumps and disparate indicator styles.
+2. Rigid 320px sidebar permanently occupying 25% of horizontal screen space.
+3. Chat layout with generic chat-app bubbles instead of an editorial, spacious, document-style workspace.
+4. AI Core with basic Canvas rendering lacking cinematic atmospheric depth, acoustic waveform reactivity, or state-governed orbital behavior.
+5. Inability for the user to explicitly select and lock a specific model provider (`auto`, `gemini`, `openai`, `local-ollama`, etc.) directly from the main view.
+
+### Redesign Principles
+- **Cinematic & Futuristic**: Deep obsidian backdrops (`#08090C`, `#0D0F14`), glassmorphism with subtle borders (`rgba(255,255,255,0.08)`), cyan/teal neural glows (`#06B6D4`, `#22D3EE`), and amber warning accents.
+- **Calm when Idle, Alive when Working**: Breathing ambient core during idle, expanding acoustic particle field during voice listening (reacting mathematically to real RMS audio levels), orbiting neural filaments during reasoning, and shimmering violet waves during TTS output.
+- **Zero Fake Animations**: Visual behavior maps strictly 1:1 with genuine EventBus events (`WAKE_DETECTED`, `MIC_LEVEL`, `MODEL_STARTED`, `TOOL_STARTED`, `TTS_STARTED`, `TTS_COMPLETED`, etc.).
+- **Uncompromised Functionality**: Preserved 100% of existing capabilities (text chat, voice capture, wake word, VAD, online STT/TTS, memory, RAG, knowledge graph, notes, tasks, permissions, RiskEngine, KillSwitch, Action Timeline, and provider diagnostics).
+
+### Core Components & Architecture
+
+1. **Centralized Master Design System (`apps/desktop/src/theme/tokens.ts` & `src/components/ui/`)**:
+   - `tokens.ts`: Strictly typed palette (Obsidian, Cyan, Emerald, Amber, Crimson, Indigo), typography scales, spacing matrix, borders, shadows, and z-index layers.
+   - `GlassSurface.tsx`: Reusable container with backdrop filters, depth tiers (`flat`, `sunken`, `default`, `elevated`, `floating`), and glow accents.
+   - `Button.tsx` & `IconButton.tsx`: Micro-interactive buttons with loading spinners, keyboard focus rings, and tactile feedback.
+   - `StatusIndicator.tsx`: Signal-strength and state dots with optional pulsing halos.
+   - `Badge.tsx`: Compact metadata chips with variant tinting.
+   - `index.css`: Custom obsidian scrollbars, keyframe definitions (`megh-pulse`, `megh-rotate`, `megh-fade-in`), and `@media (prefers-reduced-motion)` accessibility support.
+
+2. **Signature State-Reactive Canvas AI Core (`apps/desktop/src/components/AICore.tsx`)**:
+   - Multi-layer HTML5 Canvas rendering loop at 60 FPS:
+     - **Atmospheric Glow Layer**: Radial gradient pulses tuned to active AI state.
+     - **Energy Core**: Multi-radius inner core with sinusoidal luminescence.
+     - **Orbital Ring System**: Multi-axis counter-rotating particle rings with inclination tilt.
+     - **Acoustic Waveform Particle Field**: 180 particles governed by polar coordinates. When `state === 'LISTENING'`, particles radially deform in direct proportion to real mic RMS levels (`micLevel`).
+     - **Neural Filaments**: Dynamic connecting lines rendered during `THINKING` and `PLANNING` states representing active reasoning.
+     - **State Colors**:
+       - `IDLE`: Obsidian Cyan (`#06B6D4`, `#0284C7`)
+       - `LISTENING`: Electric Azure (`#38BDF8`, `#0284C7`)
+       - `THINKING`: Royal Indigo / Violet (`#818CF8`, `#6366F1`)
+       - `EXECUTING`: Neon Emerald (`#34D399`, `#059669`)
+       - `SPEAKING`: Magenta Violet (`#C084FC`, `#9333EA`)
+       - `ERROR`: Crimson Flare (`#F87171`, `#DC2626`)
+     - Clean window resize listeners and `requestAnimationFrame` lifecycle cleanup.
+
+3. **Minimalist TopBar (`apps/desktop/src/components/TopBar.tsx`)**:
+   - Left: Sleek brand logo, live AI state badge, network status dot.
+   - Center: Floating workspace navigation switcher (`Chat`, `Memory`, `Knowledge`, `Studio`, `Safety`, `Providers`, `Routines`, `Tasks`, `Notes`).
+   - Right: Interactive model selector pill, voice persona pill, auto-speak toggle, live acoustic mic button, timeline drawer button, and emergency `STOP MEGH` button.
+
+4. **Model Selector Modal (`apps/desktop/src/components/ModelSelectorModal.tsx`)**:
+   - Modal interface for selecting providers: `auto` (smart routing), `gemini` (Gemini 3.8 Flash), `openai` (GPT-4o), `local-ollama` (Llama 3.2 Offline), `anthropic`, `deepseek`, and `perplexity`.
+   - Real-time health badges (`HEALTHY`, `OFFLINE`, `UNCONFIGURED`), live latency metrics, and instant persistent selection.
+
+5. **Voice Selector Modal (`apps/desktop/src/components/VoiceSelectorModal.tsx`)**:
+   - Searchable voice browser across OneCore, SAPI, Google Cloud, and ElevenLabs.
+   - Filter by provider, language tags, test audio preview playback, and persistent selection.
+
+6. **Editorial Conversation Workspace (`apps/desktop/src/components/ChatView.tsx`)**:
+   - Spacious layout with readable max-width bounds (`max-w-3xl`).
+   - Empty state featuring quick-start prompt suggestion cards ("Check my unread notifications", "Search documents for project notes", "What is my current system status?").
+   - Assistant message blocks with verification badges, model tags, copy-to-clipboard, and listen/speak controls.
+   - Floating live transcript indicator for real-time speech feedback without duplicate message generation.
+
+7. **Floating Glassmorphic Composer (`apps/desktop/src/components/Composer.tsx`)**:
+   - Centered floating pill with blur backdrop, responsive auto-expanding input.
+   - Active model badge with quick-switch trigger, live acoustic waveform meter responding to microphone volume, command palette button (`Ctrl+Space`), and submission arrow.
+
+8. **Contextual Action Timeline Drawer (`apps/desktop/src/components/ActionTimelineDrawer.tsx`)**:
+   - Slide-out right panel accessible on demand without occupying permanent workspace real estate.
+   - Filterable timeline (`ALL`, `AI`, `VOICE`, `TOOLS`, `MEMORY`, `WINDOWS`, `ERRORS`).
+   - JSON payload inspector with syntax coloring, execution durations, and verifier receipts.
+
+9. **Unified Model Provider Routing (`apps/api/src/server.ts`, `packages/model-router/src/index.ts`)**:
+   - `POST /api/v1/input/process` and `processUserRequest` accept explicit `providerId?: string`.
+   - `ModelRouter.completeWithFallback` prioritizes the user-selected provider while preserving candidate fallback chaining on transient upstream 503/errors.
+
+### Verification Gate
+- **Unit & Subsystem Test Suite**:
+  - `tests/unit/online-first-architecture.test.ts`: 13/13 tests passing.
+  - `tests/unit/voice-pipeline-idempotency.test.ts`: 6/6 tests passing.
+  - `tests/unit/voice-input-subsystem.test.ts`: 14/14 tests passing.
+- **Type Safety**: `npm run typecheck` passed with 0 errors across all monorepo packages.
+- **Production Build**: Clean production builds for `@meghai/desktop` and `@meghai/web` with Vite (`npm run build`).
+
+---
+
+## 2026-10-03: Model Selector UI to Backend Routing Isolation & Persistence (REQ-041)
+
+### Problem Statement
+Live UI displayed `LOCAL-OLLAMA` as the active provider, yet requests failed with:
+`All candidate providers failed: [gemini]: Gemini 429 quota exhausted [openai]: OpenAI 429 credit_balance_exhausted`.
+Investigation revealed:
+1. **Frontend Disconnect**: In `App.tsx`, `selectedModel` state was in-memory only and wasn't sent or synchronized via backend persistence.
+2. **Missing Voice Provider Inheritance**: In `apps/api/src/server.ts`, `voiceInput.onCommand` called `processUserRequest` with `providerId: undefined`, dropping to AUTO routing (Gemini -> OpenAI).
+3. **Cross-Provider Leakage**: When an explicit provider was requested (e.g. `local-ollama` or `openai`), `ModelRouter.route` still added other online providers into `fallbackChain`, causing failures to cascade into Gemini and OpenAI instead of strictly executing only the chosen provider.
+4. **Model Name Collisions**: Switching providers with a stale `modelId` (e.g., `llama3.2:latest`) could send the local model name to OpenAI or Gemini, triggering upstream 404s.
+
+### Solution Architecture
+1. **Model Settings Persistence (`packages/config/src/index.ts`)**:
+   - Implemented `ModelSettingsManager`, persisting `selectedProvider`, `selectedModel`, and `allowExplicitFallback` to disk at `~/.meghai/model-settings.json`.
+   - Threaded through `apps/api/src/server.ts` with `GET /api/v1/model/settings` and `POST /api/v1/model/settings`.
+2. **Explicit Provider Isolation & Alias Normalization (`packages/model-router/src/index.ts`)**:
+   - Added `normalizeProviderId` resolving aliases (`ollama`, `local`, `local-ollama-model` -> `local-ollama`; `google` -> `gemini`, etc.).
+   - Explicit provider selection enforces `allowExplicitFallback: false` by default, setting `fallbackChain = []`. Explicit `local-ollama` never calls Gemini or OpenAI. Explicit `openai` never calls Gemini. Explicit `gemini` never calls OpenAI.
+   - Target model ID validation ensures that when switching providers, incompatible model IDs are validated against `prov.getModels()` and gracefully defaulted.
+3. **Full Voice & Chat Unified Pipeline (`apps/api/src/server.ts`)**:
+   - `processUserRequest` defaults `rawReqProvider` and `rawReqModel` to persistent `modelSettings` whenever omitted.
+   - Spoken voice commands and typed text chat execute through the exact same provider selection and routing logic.
+4. **Telemetry & Observability (`packages/shared-types/src/index.ts`)**:
+   - Enriched response payload with:
+     - `requestedProvider`
+     - `requestedModel`
+     - `actualProvider`
+     - `actualModel`
+     - `fallbackOccurred`
+     - `fallbackReason`
+     - `requestId`
+5. **Frontend State Hydration (`apps/desktop/src/App.tsx`, `ModelSelectorModal.tsx`)**:
+   - Instant local storage cache hydration on mount followed by background synchronization with `GET /api/v1/model/settings`.
+   - Modal selection dispatches `handleSelectModel(providerId, modelId)`, persisting immediately via `POST /api/v1/model/settings`.
+
+### Verification Gate
+- **Unit Tests (`tests/unit/model-selection-flow.test.ts`)**:
+  - 8 / 8 tests passing:
+    1. Normalizes aliases (`ollama` -> `local-ollama`).
+    2. Routes strictly to Local Ollama with zero cloud fallback.
+    3. Prevents cloud cascade when Local Ollama fails.
+    4. Routes strictly to OpenAI without Gemini failover.
+    5. Routes strictly to Gemini without OpenAI failover.
+    6. Enables multi-provider failover in AUTO mode.
+    7. Persists model settings across restarts via `ModelSettingsManager`.
+    8. Validates incompatible foreign model IDs against provider model catalogs.
+- **Related Test Suites**:
+  - `tests/unit/online-first-architecture.test.ts`: 13/13 passing.
+  - `tests/unit/voice-pipeline-idempotency.test.ts`: 6/6 passing.
+  - `tests/integration/memory-chat-integration.test.ts`: 6/6 passing.
+- **Live System Acceptance (`scripts/verify-live-model-selection.ts`)**:
+  - STEP 0: Model Settings endpoint & persistence verified.
+  - STEP 1 & 2: Real live Ollama completion executed (`llama3.2:latest` on `localhost:11434`, status: `COMPLETED`, `fallbackOccurred: false`).
+  - STEP 3: Explicit OpenAI test executed exclusively against OpenAI (429 reported with zero Gemini involvement).
+  - STEP 4: Explicit Gemini test executed exclusively against Gemini (429 reported with zero OpenAI involvement).
+  - STEP 5: AUTO mode verified with truthful routing telemetry.
+  - STEP 6: Spoken voice command simulation verified, automatically inheriting active `local-ollama` provider and returning `25 x 4 = 100`.
+- **Production Build**: Clean production builds for `@meghai/desktop` and `@meghai/web` with Vite.
+
+---
+
+### Milestone 8: Final Voice Reliability, Long-Command Support & Futuristic UI/UX Polish
+**Date**: October 3, 2026
+**Commitment**: Production-Grade Spoken Response Delivery, 60s Natural Speech Recognition & Premium UI/UX
+
+#### Core Symptoms Resolved
+1. **Unspoken Responses**:
+   - `AudioOutputService` used `System.Media.SoundPlayer.PlaySync()` which strictly accepts standard uncompressed WAV PCM. ElevenLabs and OpenAI were writing MP3 files, resulting in format exceptions and silent audio failure.
+   - Fixed by requesting `pcm_24000` from ElevenLabs and converting to standard RIFF WAV headers (`writePcmToWavBuffer`), using `wav` format for OpenAI TTS, and adding a dual-engine fallback in `AudioOutputService` that plays WAV via `SoundPlayer` and non-WAV via `WMPlayer.OCX`.
+   - Implemented streaming playback `playTTSStream` yielding real-time chunks with sub-second time-to-first-audio.
+2. **Long Command Utterance Truncation**:
+   - VAD had an aggressive 900ms silence timeout and `VoiceInputManager` had a 12s cap. Mid-sentence thinking pauses (1.0-1.5s) triggered premature speech end.
+   - Raised VAD natural pause silence threshold to 2.2s (2200ms) and maximum duration cap to 60s (60,000ms).
+   - Added periodic partial transcription emission (`TRANSCRIPT_PARTIAL`) every 2.5s during speech for live UI preview feedback without triggering early execution.
+   - Guaranteed single final transcript per turn (`TRANSCRIPT_FINAL`).
+3. **Voice UI and Diagnostic Transparency**:
+   - Added `POST /api/v1/voice/test` self-test diagnostic endpoint reporting `{ success, provider, voice, latencyMs, timeToFirstAudioMs, durationMs }`.
+   - Updated `VoiceCatalogService.synthesizeStream` and mapped OpenAI voices (`alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`).
+   - Enhanced `Composer.tsx` with floating animated live listening indicator and partial transcript chip.
+   - Verified `AICore.tsx` deep atmospheric field, orbital filaments, real RMS reactivity, and personality color dynamics.
+
+#### Verification & Test Metrics
+- **All 36 Test Files & 230 Tests Passing** (`npx vitest run`):
+  - `tests/unit/voice-reliability-and-long-commands.test.ts` (6 tests passing): streaming audio chunks, instant interrupt, long frame accumulation up to 60s, partial transcript preview, multi-provider voice routing, and async iterable stream synthesis.
+  - `tests/integration/api-phase2-endpoints.test.ts` (8 tests passing): verified `POST /api/v1/voice/test`.
+  - `tests/unit/audio-capture.test.ts` (14 tests passing).
+  - `tests/unit/tts-provider.test.ts` (14 tests passing).
+  - `tests/unit/multi-voice-catalog.test.ts` (20 tests passing).
+  - `tests/unit/model-selection-flow.test.ts` (8 tests passing).
+- **TypeScript Check**: `npm run typecheck` passed with 0 errors.
+- **Production Build**: `npm run build` passed with 0 errors across `@meghai/desktop` and `@meghai/web`.
+
+
+
+
+
 
 
 

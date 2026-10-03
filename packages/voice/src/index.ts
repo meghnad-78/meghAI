@@ -35,9 +35,20 @@ export { WindowsSapiTTSProvider } from './providers/sapi-provider.js';
 export { WindowsOneCoreTTSProvider } from './providers/onecore-provider.js';
 export { GoogleCloudTTSProvider } from './providers/google-provider.js';
 export { ElevenLabsTTSProvider } from './providers/elevenlabs-provider.js';
+export { OpenAITTSProvider } from './providers/openai-tts-provider.js';
 export { VoiceActivityDetector } from './vad.js';
 export { SpeechRecognitionService, WindowsSpeechSTTProvider, writePcmToWavFile } from './stt.js';
-export { AcousticWakeWordDetector, WakeWordDetector } from './wake-word.js';
+export { STTRouter } from './stt-router.js';
+export { ElevenLabsSTTProvider } from './providers/elevenlabs-stt-provider.js';
+export { GoogleCloudSTTProvider } from './providers/google-stt-provider.js';
+export { OpenAIWhisperSTTProvider } from './providers/openai-stt-provider.js';
+export {
+  validateAudioParameters,
+  analyzeAudioQuality,
+  trimSilencePadding,
+  writePcmToWavBuffer
+} from './audio-preprocessor.js';
+export { AcousticWakeWordDetector, WakeWordDetector, stripWakePhrase } from './wake-word.js';
 export { VoiceInputManager } from './voice-input-manager.js';
 
 export type {
@@ -81,7 +92,7 @@ export class AudioPlaybackService extends AudioOutputService {
     audioSource: string | Buffer | TTSSynthesisResult,
     metadata: { voiceId?: string; text?: string; correlationId?: string } = {}
   ): Promise<void> {
-    return this.playTTS(audioSource, metadata);
+    await this.playTTS(audioSource, metadata);
   }
 }
 
@@ -677,7 +688,9 @@ export class AudioCaptureService {
       streamDurationMs,
       activeDevice: this.activeDeviceName,
       isLive,
-      state: this.state
+      state: this.state,
+      aecAvailable: false,
+      aecMode: 'VOICE_SESSION_GATING_FALLBACK'
     };
   }
 

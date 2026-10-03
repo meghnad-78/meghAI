@@ -13,6 +13,7 @@ describe('MeghAI Memory End-to-End Chat Integration', () => {
     await fs.mkdir(tempDir, { recursive: true });
 
     server = new MeghAIServer(tempDir);
+    await server.voiceSettings.updateSettings({ autoSpeak: 'OFF' });
     await server.start(0);
 
     // Mock local-ollama provider so the test runs fast and isolated without external daemon reliance
@@ -43,9 +44,9 @@ describe('MeghAI Memory End-to-End Chat Integration', () => {
         }
       }],
       checkHealth: async () => ({ available: true, latencyMs: 5, isConfigured: true }),
-      complete: async req => {
-        const sysMsg = req.messages.find(m => m.role === 'system');
-        const userMsg = req.messages.find(m => m.role === 'user');
+      complete: async (req: any) => {
+        const sysMsg = req.messages.find((m: any) => m.role === 'system');
+        const userMsg = req.messages.find((m: any) => m.role === 'user');
 
         if (sysMsg && sysMsg.content.includes('Java')) {
           return {

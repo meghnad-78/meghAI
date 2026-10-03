@@ -9,6 +9,7 @@ import { WindowsSapiTTSProvider } from './providers/sapi-provider.js';
 import { WindowsOneCoreTTSProvider } from './providers/onecore-provider.js';
 import { GoogleCloudTTSProvider } from './providers/google-provider.js';
 import { ElevenLabsTTSProvider } from './providers/elevenlabs-provider.js';
+import { OpenAITTSProvider } from './providers/openai-tts-provider.js';
 
 export interface VoiceFilterOptions {
   language?: string;
@@ -20,7 +21,7 @@ export interface VoiceFilterOptions {
 
 /**
  * Unified Multi-Provider Voice Catalog Service
- * Aggregates 100+ real voices across Windows SAPI, Windows OneCore, Google Cloud, and ElevenLabs.
+ * Aggregates 100+ real voices across Windows SAPI, Windows OneCore, Google Cloud, ElevenLabs, and OpenAI.
  */
 export class VoiceCatalogService {
   private providers: Map<string, TTSProvider> = new Map();
@@ -37,6 +38,7 @@ export class VoiceCatalogService {
       const onecore = new WindowsOneCoreTTSProvider();
       const google = new GoogleCloudTTSProvider();
       const eleven = new ElevenLabsTTSProvider();
+      const openai = new OpenAITTSProvider();
 
       this.providers.set('windows-sapi', sapi);
       this.providers.set('local', sapi); // Alias for backward compatibility
@@ -45,6 +47,7 @@ export class VoiceCatalogService {
       this.providers.set('google-cloud-tts', google);
       this.providers.set('google', google); // Alias
       this.providers.set('elevenlabs', eleven);
+      this.providers.set('openai', openai);
     }
   }
 
@@ -60,7 +63,7 @@ export class VoiceCatalogService {
     const seenIds = new Set<string>();
 
     // Query canonical providers
-    const canonicalKeys = ['windows-sapi', 'windows-onecore', 'google-cloud', 'elevenlabs'];
+    const canonicalKeys = ['windows-sapi', 'windows-onecore', 'google-cloud', 'elevenlabs', 'openai'];
     for (const key of canonicalKeys) {
       const provider = this.providers.get(key);
       if (!provider) continue;
@@ -83,11 +86,23 @@ export class VoiceCatalogService {
   }
 
   public listVoices(filter?: VoiceFilterOptions): VoiceProfile[] {
-    let list = this.voiceCache.length > 0 ? this.voiceCache : this.getSeedCatalog();
+    const rawList = this.voiceCache.length > 0 ? this.voiceCache : this.getSeedCatalog();
+    const enrichedList = rawList.map(v => ({
+      ...v,
+      voiceId: v.id,
+      requiresCredential: v.requiresApiKey ?? (v.provider !== 'windows-sapi' && v.provider !== 'windows-onecore' && (v.provider as any) !== 'local'),
+      supportedControls: v.capabilities ? [
+        ...(v.capabilities.speedSupport ? ['speed'] : []),
+        ...(v.capabilities.pitchSupport ? ['pitch'] : []),
+        ...(v.capabilities.emotionSupport ? ['emotion'] : []),
+        ...(v.capabilities.styleSupport ? ['style'] : []),
+        ...(v.capabilities.streamingSupport ? ['streaming'] : [])
+      ] : ['speed', 'pitch']
+    }));
 
-    if (!filter) return list;
+    if (!filter) return enrichedList;
 
-    return list.filter(v => {
+    return enrichedList.filter(v => {
       if (filter.language && !(v.language || '').toLowerCase().startsWith(filter.language.toLowerCase())) {
         return false;
       }
@@ -153,6 +168,13 @@ export class VoiceCatalogService {
       const p = this.providers.get('elevenlabs');
       if (p) return p;
     }
+    if (
+      voiceId.startsWith('openai-') ||
+      ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].includes(voiceId.toLowerCase())
+    ) {
+      const p = this.providers.get('openai');
+      if (p) return p;
+    }
 
     // Default to windows-onecore or windows-sapi
     return this.providers.get('windows-onecore') || this.providers.get('windows-sapi') || this.providers.get('local')!;
@@ -168,16 +190,55 @@ export class VoiceCatalogService {
     try {
       return await provider.synthesize(text, options);
     } catch (err: any) {
-      // If a cloud provider failed because API key is missing, fall back cleanly to local OneCore/SAPI
-      if (provider.id === 'google-cloud' || provider.id === 'elevenlabs') {
-        const fallbackProvider = this.providers.get('windows-onecore') || this.providers.get('windows-sapi')!;
-        return await fallbackProvider.synthesize(text, {
-          ...options,
-          voiceId: 'onecore-heera'
-        });
+      console.warn(`[VoiceCatalog] Selected provider '${provider.id}' failed for voice '${voiceId}':`, err.message);
+      // If a cloud provider failed, only fallback if allowed
+      if (options.allowFallback ?? true) {
+        if (provider.id === 'google-cloud' || provider.id === 'elevenlabs' || provider.id === 'openai') {
+          const fallbackProvider = this.providers.get('windows-onecore') || this.providers.get('windows-sapi')!;
+          console.warn(`[VoiceCatalog] Explicit fallback to '${fallbackProvider.id}' (onecore-heera) for voice '${voiceId}'`);
+          return await fallbackProvider.synthesize(text, {
+            ...options,
+            voiceId: 'onecore-heera'
+          });
+        }
       }
       throw err;
     }
+  }
+
+  /**
+   * Synthesize speech as a stream of audio chunks for low-latency playback
+   */
+  public async synthesizeStream(text: string, options: TTSOptions = {}): Promise<AsyncIterable<Buffer>> {
+    const voiceId = options.voiceId || 'onecore-heera';
+    const provider = this.getProviderForVoice(voiceId);
+
+    if (typeof (provider as any).synthesizeStream === 'function') {
+      try {
+        return await (provider as any).synthesizeStream(text, options);
+      } catch (err: any) {
+        console.warn(`[VoiceCatalog] Stream synthesis failed on '${provider.id}':`, err.message);
+        if (!(options.allowFallback ?? true)) throw err;
+      }
+    }
+
+    // Fallback: Synthesize full buffer and yield as a single chunk
+    const result = await this.synthesize(text, options);
+    const audioBuf = result.audioBuffer || Buffer.alloc(0);
+    return {
+      [Symbol.asyncIterator]: () => {
+        let sent = false;
+        return {
+          async next(): Promise<IteratorResult<Buffer, any>> {
+            if (!sent) {
+              sent = true;
+              return { done: false, value: audioBuf };
+            }
+            return { done: true, value: undefined };
+          }
+        };
+      }
+    };
   }
 
   public getStats(): {
@@ -196,7 +257,8 @@ export class VoiceCatalogService {
       'windows-sapi': { total: 0, available: 0 },
       'windows-onecore': { total: 0, available: 0 },
       'google-cloud-tts': { total: 0, available: 0 },
-      'elevenlabs': { total: 0, available: 0 }
+      'elevenlabs': { total: 0, available: 0 },
+      'openai': { total: 0, available: 0 }
     };
     let availableCount = 0;
     let offlineReadyCount = 0;
@@ -239,13 +301,15 @@ export class VoiceCatalogService {
     const onecore = new WindowsOneCoreTTSProvider();
     const google = new GoogleCloudTTSProvider();
     const eleven = new ElevenLabsTTSProvider();
+    const openai = new OpenAITTSProvider();
 
     // Use synchronous fallbacks for instant synchronous access before async initialize()
     const sapiVoices = (sapi as any).getStandardFallbackVoices?.() || [];
     const onecoreVoices = (onecore as any).getStandardFallbackVoices?.() || [];
     const googleVoices = (google as any).getGoogleCatalog?.() || [];
     const elevenVoices = (eleven as any).getElevenLabsCatalog?.() || [];
+    const openaiVoices = (openai as any).getOpenAICatalog?.() || [];
 
-    return [...sapiVoices, ...onecoreVoices, ...googleVoices, ...elevenVoices];
+    return [...sapiVoices, ...onecoreVoices, ...googleVoices, ...elevenVoices, ...openaiVoices];
   }
 }

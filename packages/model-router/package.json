@@ -7,7 +7,8 @@
   "types": "./dist/index.d.ts",
   "dependencies": {
     "@meghai/shared-types": "*",
-    "@meghai/security": "*"
+    "@meghai/security": "*",
+    "@meghai/config": "*"
   },
   "scripts": {
     "build": "tsc",

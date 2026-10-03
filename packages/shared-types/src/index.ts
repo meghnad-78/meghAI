@@ -266,6 +266,13 @@ export interface ModelResponse {
   }>;
   latencyMs: number;
   finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error';
+  fallbackOccurred?: boolean;
+  fallbackReason?: string;
+  requestedProvider?: string;
+  requestedModel?: string;
+  actualProvider?: ModelProviderId;
+  actualModel?: string;
+  requestId?: string;
 }
 
 export interface ModelStreamChunk {
@@ -440,6 +447,7 @@ export type EventType =
   | 'VOICE_TRANSCRIBING'
   | 'TRANSCRIPT_PARTIAL'
   | 'TRANSCRIPT_FINAL'
+  | 'VOICE_MODEL_RATE_LIMITED'
   | 'STT_STARTED'
   | 'STT_COMPLETED'
   | 'TTS_REQUESTED'
@@ -456,6 +464,8 @@ export type EventType =
   | 'AUDIO_CUE_COMPLETED'
   | 'AUDIO_STATE_CHANGED'
   | 'VOICE_ERROR'
+  | 'VOICE_RECOGNITION_GATED'
+  | 'VOICE_RECOGNITION_RESUMED'
   | 'INTERRUPTED'
   | 'LANGUAGE_DETECTED'
   | 'INTENT_CLASSIFIED'
@@ -465,6 +475,7 @@ export type EventType =
   | 'MODEL_SELECTED'
   | 'MODEL_STARTED'
   | 'MODEL_CHUNK'
+  | 'MODEL_FALLBACK'
   | 'MODEL_COMPLETED'
   | 'TOOL_REQUESTED'
   | 'TOOL_APPROVAL_REQUIRED'
@@ -482,6 +493,9 @@ export type EventType =
   | 'MEMORY_STORED'
   | 'MEMORY_DELETED'
   | 'ROUTINE_TRIGGERED'
+  | 'MODEL_SETTINGS_CHANGED'
+  | 'PERSONALITY_SETTINGS_CHANGED'
+  | 'WAKE_ACTIVATION_STARTED'
   | 'AI_STATE_CHANGED';
 
 export interface MeghAIEvent<T = unknown> {
@@ -507,6 +521,7 @@ export type VoiceProviderId =
   | 'windows-onecore'
   | 'google-cloud'
   | 'elevenlabs'
+  | 'openai'
   | 'local-offline'
   | 'local'
   | 'google';
@@ -561,6 +576,7 @@ export interface TTSOptions {
   pitch?: number;      // 0.5 to 1.5 (default 1.0)
   volume?: number;     // 0.0 to 1.0 (default 1.0)
   outputFormat?: 'wav' | 'mp3';
+  allowFallback?: boolean;
 }
 
 export interface TTSSynthesisResult {
@@ -641,6 +657,8 @@ export interface AudioCaptureDiagnostics {
   activeDevice: string;
   isLive: boolean;
   state: MicrophoneState;
+  aecAvailable?: boolean;
+  aecMode?: 'HARDWARE_DSP' | 'VOICE_SESSION_GATING_FALLBACK' | 'DISABLED';
 }
 
 export type VADState = 'SILENCE' | 'SPEECH';
@@ -658,26 +676,147 @@ export type VoiceInputState =
   | 'IDLE'
   | 'PASSIVE_WAKE_LISTENING'
   | 'WAKE_CONFIRMED'
+  | 'WAKE_DETECTED'
+  | 'ACTIVATION'
   | 'COMMAND_CAPTURE'
+  | 'COMMAND_LISTENING'
   | 'TRANSCRIBING'
   | 'PROCESSING'
   | 'SPEAKING'
+  | 'INTERRUPTED'
   | 'ERROR';
+
+export type PersonalityId =
+  | 'professional'
+  | 'warm'
+  | 'futuristic'
+  | 'calm'
+  | 'coding_partner'
+  | 'research_analyst'
+  | 'study_coach'
+  | 'executive_assistant'
+  | 'creative_partner'
+  | 'motivator'
+  | 'minimalist'
+  | 'technical_expert';
+
+export interface PersonalityProfile {
+  id: PersonalityId | string;
+  name: string;
+  description: string;
+  tone: string;
+  verbosity: 'concise' | 'balanced' | 'comprehensive';
+  humorLevel: 'none' | 'low' | 'moderate' | 'playful';
+  formality: 'formal' | 'adaptive' | 'casual';
+  initiativeLevel: 'task_only' | 'balanced' | 'proactive';
+  empathyStyle: 'objective' | 'supportive' | 'calm' | 'expressive';
+  technicalDepth: 'high' | 'balanced' | 'simplified';
+  proactivity: 'low' | 'medium' | 'high';
+  visualStyle: 'precise' | 'soft' | 'orbital' | 'breathing' | 'minimal';
+  preferredVoiceTags: string[];
+  systemInstruction: string;
+}
+
+export interface PersonalitySettings {
+  selectedPersonalityId: string;
+  customInstructions?: string;
+}
+
+export type OnlineSystemStatus =
+  | 'ONLINE'
+  | 'ONLINE_DEGRADED'
+  | 'CONNECTING'
+  | 'DEGRADED'
+  | 'PROVIDER_ERROR'
+  | 'NO_CREDENTIALS'
+  | 'RATE_LIMITED'
+  | 'NETWORK_UNAVAILABLE';
+
+export type STTQualityMode = 'REALTIME' | 'BALANCED' | 'HIGH_ACCURACY';
+
+export interface STTWordTiming {
+  word: string;
+  startMs: number;
+  endMs: number;
+  confidence?: number;
+}
 
 export interface STTResult {
   text: string;
   confidence: number;
   culture?: string;
   language?: string;
+  detectedLanguage?: string;
+  languageMetadata?: {
+    code: string;
+    name?: string;
+    isCodeSwitched?: boolean;
+    confidence?: number;
+  };
+  timestamps?: STTWordTiming[];
   durationMs?: number;
+  providerId?: string;
+  modelId?: string;
   isFinal: boolean;
+  rawText?: string;
+  interpretedText?: string;
+}
+
+export interface STTCapabilities {
+  supportsRealtime: boolean;
+  supportsKeytermBiasing: boolean;
+  supportsLanguageDetection: boolean;
+  supportsCodeSwitching: boolean;
+  supportedAudioEncodings: string[];
+  languages: string[];
+  models: string[];
+}
+
+export interface STTOptions {
+  culture?: string;
+  language?: string;
+  sampleRate?: number;
+  keyterms?: string[];
+  qualityMode?: STTQualityMode;
+  enableCodeSwitching?: boolean;
+  stream?: boolean;
+  providerId?: string;
+  modelId?: string;
+}
+
+export interface STTProviderHealth {
+  available: boolean;
+  latencyMs: number;
+  isConfigured: boolean;
+  message?: string;
+  lastChecked?: string;
 }
 
 export interface STTProvider {
   readonly id: string;
   readonly name: string;
-  transcribe(audioBuffer: Buffer, options?: { culture?: string; sampleRate?: number }): Promise<STTResult>;
+  initialize?(): Promise<void>;
+  transcribe(audioBuffer: Buffer, options?: STTOptions): Promise<STTResult>;
+  transcribeRealtime?(
+    audioStream: AsyncIterable<Buffer>,
+    onPartial: (partial: STTResult) => void,
+    options?: STTOptions
+  ): Promise<STTResult>;
+  getLanguages?(): string[];
+  getCapabilities?(): STTCapabilities;
+  healthCheck?(): Promise<STTProviderHealth>;
   isAvailable(): Promise<boolean> | boolean;
+  isConfigured?(): boolean;
+}
+
+export interface STTRoutingDecision {
+  selectedProvider: string;
+  modelId?: string;
+  reason: string;
+  qualityMode: STTQualityMode;
+  fallbackChain: string[];
+  language?: string;
+  keytermsApplied?: string[];
 }
 
 export interface WakeWordResult {

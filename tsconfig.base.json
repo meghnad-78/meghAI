@@ -31,7 +31,8 @@
       "@meghai/knowledge-graph": ["packages/knowledge-graph/src/index.ts", "../knowledge-graph/src/index.ts", "../../packages/knowledge-graph/src/index.ts"],
       "@meghai/voice": ["packages/voice/src/index.ts", "../voice/src/index.ts", "../../packages/voice/src/index.ts"],
       "@meghai/integrations": ["packages/integrations/src/index.ts", "../integrations/src/index.ts", "../../packages/integrations/src/index.ts"],
-      "@meghai/observability": ["packages/observability/src/index.ts", "../observability/src/index.ts", "../../packages/observability/src/index.ts"]
+      "@meghai/observability": ["packages/observability/src/index.ts", "../observability/src/index.ts", "../../packages/observability/src/index.ts"],
+      "@meghai/config": ["packages/config/src/index.ts", "../config/src/index.ts", "../../packages/config/src/index.ts"]
     }
   }
 }

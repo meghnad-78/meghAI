@@ -694,3 +694,5 @@ export class DailyBriefService {
   }
 }
 
+export * from './personality.js';
+

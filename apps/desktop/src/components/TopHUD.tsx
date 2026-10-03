@@ -6,7 +6,8 @@ interface TopHUDProps {
   micState: MicrophoneState;
   voiceInputState?: VoiceInputState;
   micLevel?: number;
-  isLocalMode: boolean;
+  isLocalMode?: boolean;
+  onlineStatus?: string;
   autoSpeak?: 'OFF' | 'ON' | 'ASK';
   onToggleAutoSpeak?: () => void;
   onEmergencyStop: () => void;
@@ -18,7 +19,8 @@ export const TopHUD: React.FC<TopHUDProps> = ({
   micState,
   voiceInputState = 'IDLE',
   micLevel = 0,
-  isLocalMode,
+  isLocalMode = false,
+  onlineStatus = 'ONLINE',
   autoSpeak = 'ON',
   onToggleAutoSpeak,
   onEmergencyStop,
@@ -257,7 +259,7 @@ export const TopHUD: React.FC<TopHUDProps> = ({
           )}
         </button>
 
-        {/* Cloud / Local Mode Indicator */}
+        {/* Online Status Indicator (Section 27 & 39) */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -273,9 +275,12 @@ export const TopHUD: React.FC<TopHUDProps> = ({
             width: '8px',
             height: '8px',
             borderRadius: '50%',
-            backgroundColor: isLocalMode ? '#f59e0b' : '#38bdf8'
+            backgroundColor: (onlineStatus === 'ONLINE' || !isLocalMode) ? '#10b981' : onlineStatus === 'ONLINE_DEGRADED' ? '#f59e0b' : '#f59e0b',
+            boxShadow: (onlineStatus === 'ONLINE' || !isLocalMode) ? '0 0 8px rgba(16, 185, 129, 0.5)' : 'none'
           }} />
-          <span>{isLocalMode ? 'LOCAL MODE' : 'CLOUD CONNECTED'}</span>
+          <span style={{ fontWeight: 600 }}>
+            {onlineStatus === 'ONLINE' ? 'ONLINE' : onlineStatus === 'ONLINE_DEGRADED' ? 'ONLINE (DEGRADED)' : onlineStatus === 'NO_CREDENTIALS' ? 'ONLINE (NO KEYS)' : 'ONLINE'}
+          </span>
         </div>
       </div>
 

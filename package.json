@@ -12,7 +12,7 @@
     "dev:all": "concurrently -k -p \"[{name}]\" -n \"API,AGENT,DESKTOP,WEB\" -c \"cyan,blue,magenta,green\" \"npm run api\" \"npm run windows-agent\" \"npm run desktop\" \"npm run web\"",
     "desktop": "npm run dev --workspace=@meghai/desktop",
     "web": "npm run dev --workspace=@meghai/web",
-    "api": "tsx apps/api/src/index.ts",
+    "api": "tsx watch apps/api/src/index.ts",
     "windows-agent": "tsx apps/windows-agent/src/index.ts",
     "build": "tsc --noEmit && npm run build --workspace=@meghai/desktop && npm run build --workspace=@meghai/web",
     "test": "vitest run",
@@ -34,5 +34,9 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true
   }
 }
