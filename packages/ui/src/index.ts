@@ -126,6 +126,12 @@ export const AI_STATE_THEMES: Record<
     label: 'CANCELLED',
     animationSpeed: 0.5,
   },
+  STOPPED: {
+    primaryColor: MEGHAI_COLORS.redCritical,
+    glowColor: 'rgba(255, 0, 85, 0.7)',
+    label: 'STOPPED',
+    animationSpeed: 0.5,
+  },
 };
 
 export const RISK_BADGE_STYLES: Record<

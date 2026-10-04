@@ -154,10 +154,18 @@ export class MeghAIServer {
       } else if (state === 'PROCESSING') {
         this.setAIState('EXECUTING');
       } else if (state === 'SPEAKING') {
-        this.setAIState('SPEAKING');
-      } else if (state === 'PASSIVE_WAKE_LISTENING') {
-        if (this.aiState !== 'SPEAKING') {
-          this.setAIState('READY');
+        if (!KillSwitch.isActive()) {
+          this.setAIState('SPEAKING');
+        } else {
+          this.setAIState('STOPPED');
+        }
+      } else if (state === 'PASSIVE_WAKE_LISTENING' || state === 'IDLE') {
+        if (this.aiState === 'SPEAKING' || this.aiState === 'LISTENING' || this.aiState === 'UNDERSTANDING' || this.aiState === 'EXECUTING') {
+          if (!KillSwitch.isActive()) {
+            this.setAIState('READY');
+          } else {
+            this.setAIState('STOPPED');
+          }
         }
       }
     });
@@ -200,7 +208,11 @@ export class MeghAIServer {
     // Reset AI state when audio playback finishes or stops
     this.audioPlayback.onStop(() => {
       if (this.aiState === 'SPEAKING') {
-        this.setAIState('READY');
+        if (KillSwitch.isActive()) {
+          this.setAIState('STOPPED');
+        } else {
+          this.setAIState('READY');
+        }
       }
     });
 
@@ -209,11 +221,41 @@ export class MeghAIServer {
       this.audioPlayback.stop(reason);
       this.voiceInput.exitSpeakingState(reason);
       this.voiceInput.stop(reason).catch(() => {});
-      this.eventBus.publish('INTERRUPTED', { reason: 'Emergency Kill Switch Activated' });
+      this.setAIState('STOPPED');
+      this.eventBus.publish('KILLSWITCH_ACTIVATED', {
+        reason: reason || 'Emergency Kill Switch Activated',
+        timestamp: new Date().toISOString(),
+        source: 'SYSTEM'
+      });
+      this.eventBus.publish('KILL_SWITCH_ACTIVATED', {
+        reason: reason || 'Emergency Kill Switch Activated',
+        timestamp: new Date().toISOString(),
+        source: 'SYSTEM'
+      });
+      this.eventBus.publish('INTERRUPTED', { reason: reason || 'Emergency Kill Switch Activated' });
       if (this.audioCapture.isCapturing()) {
         this.audioCapture.stop(reason);
       }
     });
+
+    // Wire KillSwitch onReset to restore AI state and publish events
+    KillSwitch.onReset((reason) => {
+      this.setAIState('READY');
+      this.eventBus.publish('KILLSWITCH_RESET', {
+        reason: reason || 'Emergency Kill Switch Cleared',
+        timestamp: new Date().toISOString(),
+        source: 'SYSTEM'
+      });
+      this.eventBus.publish('KILL_SWITCH_RESET', {
+        reason: reason || 'Emergency Kill Switch Cleared',
+        timestamp: new Date().toISOString(),
+        source: 'SYSTEM'
+      });
+    });
+
+    // Ensure clean initialization on startup
+    KillSwitch.reset('Initial server boot');
+    this.aiState = 'READY';
 
     // Play pleasant startup audio chime asynchronously
     this.audioPlayback.playCue('startup').catch(() => {});
@@ -236,6 +278,10 @@ export class MeghAIServer {
     this.eventBus.publish('AI_STATE_CHANGED', { state });
   }
 
+  public getAIState(): AIState {
+    return this.aiState;
+  }
+
   private setupEventListeners(): void {
     // Forward all bus events to active SSE clients
     this.eventBus.subscribe('*', event => {
@@ -249,10 +295,6 @@ export class MeghAIServer {
       }
     });
 
-    KillSwitch.onKill(reason => {
-      this.setAIState('CANCELLED');
-      this.eventBus.publish('KILL_SWITCH_ACTIVATED', { reason });
-    });
   }
 
   private registerToolHandlers(): void {
@@ -385,6 +427,7 @@ export class MeghAIServer {
             res.end(JSON.stringify({
               status: 'HEALTHY',
               aiState: this.aiState,
+              killSwitchActive: KillSwitch.isActive(),
               uptime: process.uptime(),
               version: '0.1.0'
             }));
@@ -499,27 +542,35 @@ export class MeghAIServer {
             const result = KillSwitch.stopMegh('User triggered emergency kill switch.');
             if (this.audioPlayback.isPlaying()) {
               this.audioPlayback.stop('Emergency Kill Switch triggered');
-              this.eventBus.publish('INTERRUPTED', { reason: 'Emergency Kill Switch triggered' });
             }
+            this.voiceInput.exitSpeakingState('Emergency Kill Switch triggered');
             if (this.audioCapture.isCapturing()) {
               this.audioCapture.stop('Emergency Kill Switch triggered');
             }
-            this.setAIState('CANCELLED');
+            this.setAIState('STOPPED');
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
               success: true,
+              active: true,
+              status: 'STOPPED',
               message: 'STOP MEGH executed successfully.',
               result
             }));
             return;
           }
 
-          // Reset Kill Switch: /api/v1/system/reset-kill
-          if (pathname === '/api/v1/system/reset-kill' && req.method === 'POST') {
-            KillSwitch.reset();
+          // Reset Kill Switch: /api/v1/system/kill/reset (and legacy /api/v1/system/reset-kill)
+          if ((pathname === '/api/v1/system/kill/reset' || pathname === '/api/v1/system/reset-kill') && req.method === 'POST') {
+            const result = KillSwitch.reset('User triggered kill switch reset via API');
+            this.actionOrchestrator.clearCancelledPlans();
             this.setAIState('READY');
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, aiState: this.aiState }));
+            res.end(JSON.stringify({
+              success: true,
+              active: false,
+              status: 'RESET',
+              aiState: this.aiState
+            }));
             return;
           }
 
@@ -1352,6 +1403,13 @@ export class MeghAIServer {
    * Synthesizes and speaks text directly via Windows default audio device.
    */
   public async speakResponse(text: string, correlationId?: string): Promise<void> {
+    if (KillSwitch.isActive()) {
+      if (this.aiState === 'SPEAKING') {
+        this.setAIState('STOPPED');
+      }
+      return;
+    }
+
     const settings = this.voiceSettings.getSettings();
     if (!text) return;
 
@@ -1474,7 +1532,11 @@ export class MeghAIServer {
     } finally {
       this.voiceInput.exitSpeakingState('TTS playback completed');
       if (this.aiState === 'SPEAKING') {
-        this.setAIState('READY');
+        if (KillSwitch.isActive()) {
+          this.setAIState('STOPPED');
+        } else {
+          this.setAIState('READY');
+        }
       }
     }
   }
@@ -1500,6 +1562,93 @@ export class MeghAIServer {
       commandId: meta?.commandId,
       source: meta?.source || 'TEXT'
     }, correlationId);
+
+    const trimmedInput = rawText.trim();
+    const strippedWake = trimmedInput.replace(/^(hey\s+megh|megh|please)[,\s]*/i, '').trim();
+
+    // Natural Language Emergency Stop Command ("STOP", "STOP MEGH", "ABORT", "CANCEL")
+    if (
+      /^(stop|cancel|halt|never\s*mind|megh[,\s]+stop|stop\s+megh|abort)[\s.!]*$/i.test(trimmedInput) ||
+      /^(stop|cancel|halt|never\s*mind|megh[,\s]+stop|stop\s+megh|abort)[\s.!]*$/i.test(strippedWake)
+    ) {
+      KillSwitch.stopMegh('User triggered emergency stop via command');
+      if (this.audioPlayback.isPlaying()) {
+        this.audioPlayback.stop('Emergency stop command');
+      }
+      this.voiceInput.exitSpeakingState('Emergency stop command');
+      if (this.audioCapture.isCapturing()) {
+        this.audioCapture.stop('Emergency stop command');
+      }
+      this.setAIState('STOPPED');
+      const response = {
+        status: 'CANCELLED',
+        verificationStatus: 'VERIFIED',
+        reply: 'Stopped. All active tasks have been cancelled.',
+        timelineCorrelationId: correlationId
+      };
+      this.eventBus.publish('TASK_CANCELLED', {
+        ...response,
+        voiceSessionId: meta?.voiceSessionId,
+        commandId: meta?.commandId
+      }, correlationId);
+      return response;
+    }
+
+    // Explicit Reset Command ("Resume Megh", "Enable Megh", "Clear emergency stop")
+    if (
+      /^(resume\s+megh|enable\s+megh|clear\s+emergency\s+stop|unblock\s+megh)[\s.!]*$/i.test(trimmedInput) ||
+      /^(resume\s+megh|enable\s+megh|clear\s+emergency\s+stop|unblock\s+megh)[\s.!]*$/i.test(strippedWake)
+    ) {
+      KillSwitch.reset('User requested reset via command');
+      this.actionOrchestrator.clearCancelledPlans();
+      this.setAIState('READY');
+      this.eventBus.publish('KILLSWITCH_RESET', {
+        reason: 'Reset via command',
+        source: meta?.source || 'USER',
+        timestamp: new Date().toISOString()
+      }, correlationId);
+      this.eventBus.publish('KILL_SWITCH_RESET', {
+        reason: 'Reset via command',
+        source: meta?.source || 'USER',
+        timestamp: new Date().toISOString()
+      }, correlationId);
+
+      const response = {
+        status: 'COMPLETED',
+        verificationStatus: 'VERIFIED',
+        reply: 'Emergency stop cleared. MeghAI is now ready.',
+        timelineCorrelationId: correlationId
+      };
+      this.eventBus.publish('TASK_COMPLETED', {
+        ...response,
+        voiceSessionId: meta?.voiceSessionId,
+        commandId: meta?.commandId
+      }, correlationId);
+      if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+        try {
+          await this.speakResponse(response.reply, correlationId);
+        } catch {}
+      }
+      return response;
+    }
+
+    // Check KillSwitch state before executing any other command
+    if (KillSwitch.isActive()) {
+      this.setAIState('STOPPED');
+      const response = {
+        status: 'FAILED',
+        verificationStatus: 'FAILED',
+        error: 'Execution cancelled: Emergency Kill Switch (STOP MEGH) is currently active.',
+        reply: 'Execution cancelled: Emergency Kill Switch (STOP MEGH) is currently active.',
+        timelineCorrelationId: correlationId
+      };
+      this.eventBus.publish('TASK_FAILED', {
+        ...response,
+        voiceSessionId: meta?.voiceSessionId,
+        commandId: meta?.commandId
+      }, correlationId);
+      return response;
+    }
 
     // 1. Core Input Pipeline
     this.setAIState('UNDERSTANDING');
@@ -1630,7 +1779,9 @@ export class MeghAIServer {
         userConfirmed
       });
 
-      if (actionResult.status === 'WAITING_FOR_USER' || actionResult.state === 'WAITING_FOR_CONFIRMATION') {
+      if (KillSwitch.isActive()) {
+        this.setAIState('STOPPED');
+      } else if (actionResult.status === 'WAITING_FOR_USER' || actionResult.state === 'WAITING_FOR_CONFIRMATION') {
         this.setAIState('WAITING_FOR_CONFIRMATION');
       } else {
         this.setAIState('READY');
@@ -1642,7 +1793,7 @@ export class MeghAIServer {
         commandId: meta?.commandId
       }, correlationId);
 
-      if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+      if (!KillSwitch.isActive() && (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE')) {
         try {
           await this.speakResponse(actionResult.reply, correlationId);
         } catch {}

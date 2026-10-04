@@ -223,6 +223,7 @@ export class KillSwitch {
   private static registeredAbortControllers = new Set<AbortController>();
   private static registeredProcesses = new Set<{ pid: number; kill: () => void }>();
   private static listeners = new Set<(reason: string) => void>();
+  private static resetListeners = new Set<(reason: string) => void>();
 
   public static registerAbortController(controller: AbortController): () => void {
     if (this.isActivated) {
@@ -245,6 +246,11 @@ export class KillSwitch {
   public static onKill(listener: (reason: string) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  public static onReset(listener: (reason: string) => void): () => void {
+    this.resetListeners.add(listener);
+    return () => this.resetListeners.delete(listener);
   }
 
   public static trigger(reason = 'Emergency Kill Switch Triggered by User'): {
@@ -296,8 +302,27 @@ export class KillSwitch {
     return { cancelledControllers: controllersCount, killedProcesses: processesCount };
   }
 
-  public static reset(): void {
+  public static reset(reason = 'Emergency Kill Switch Cleared / Resumed by User'): {
+    success: boolean;
+    active: boolean;
+    status: 'RESET';
+  } {
     this.isActivated = false;
+
+    // Clear stale abort controllers and child process registrations
+    this.registeredAbortControllers.clear();
+    this.registeredProcesses.clear();
+
+    // Notify reset listeners
+    for (const listener of this.resetListeners) {
+      try {
+        listener(reason);
+      } catch {
+        // Prevent listener error from breaking reset
+      }
+    }
+
+    return { success: true, active: false, status: 'RESET' };
   }
 
   public static isActive(): boolean {

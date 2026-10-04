@@ -23,7 +23,8 @@ export type AIState =
   | 'PAUSED'
   | 'COMPLETED'
   | 'FAILED'
-  | 'CANCELLED';
+  | 'CANCELLED'
+  | 'STOPPED';
 
 // ---------------------------------------------------------------------------
 // 2. Task State Machine (Section 41)
@@ -572,6 +573,9 @@ export type EventType =
   | 'TASK_FAILED'
   | 'TASK_CANCELLED'
   | 'KILL_SWITCH_ACTIVATED'
+  | 'KILL_SWITCH_RESET'
+  | 'KILLSWITCH_ACTIVATED'
+  | 'KILLSWITCH_RESET'
   | 'MEMORY_COMMAND_DETECTED'
   | 'MEMORY_CANDIDATE_CREATED'
   | 'MEMORY_PROMOTED'

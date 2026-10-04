@@ -34,6 +34,7 @@ interface TopBarProps {
   onOpenPersonalitySelector?: () => void;
   onToggleTimeline: () => void;
   onEmergencyStop: () => void;
+  onResetEmergencyStop?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -55,7 +56,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenVoiceSelector,
   onOpenPersonalitySelector,
   onToggleTimeline,
-  onEmergencyStop
+  onEmergencyStop,
+  onResetEmergencyStop
 }) => {
   const isMicListening = micState === 'MIC_LISTENING';
 
@@ -333,29 +335,54 @@ export const TopBar: React.FC<TopBarProps> = ({
           <span>{eventCount}</span>
         </button>
 
-        {/* Emergency STOP MEGH / Kill Switch (High-Visibility Vermilion Architectural Button) */}
-        <button
-          onClick={onEmergencyStop}
-          title="Emergency Stop: Halts TTS, cancels active model, and stops tool execution immediately"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: tokens.colors.semantic.errorMuted,
-            border: `1px solid ${tokens.colors.semantic.error}`,
-            borderRadius: tokens.radii.sm,
-            padding: '4px 10px',
-            color: '#f8b4b0',
-            fontSize: tokens.typography.sizes.xs,
-            fontFamily: tokens.typography.fontMono,
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: tokens.transitions.fast
-          }}
-        >
-          <KillSwitchIcon size={12} color="#f8b4b0" />
-          <span>STOP MEGH</span>
-        </button>
+        {/* Emergency STOP MEGH / Kill Switch / RESUME MEGH */}
+        {aiState === 'STOPPED' || aiState === 'CANCELLED' ? (
+          <button
+            onClick={onResetEmergencyStop || onEmergencyStop}
+            title="Resume Megh: Clear emergency stop and restore system to READY state"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(16, 185, 129, 0.15)',
+              border: `1px solid ${tokens.colors.semantic.success}`,
+              borderRadius: tokens.radii.sm,
+              padding: '4px 10px',
+              color: '#6ee7b7',
+              fontSize: tokens.typography.sizes.xs,
+              fontFamily: tokens.typography.fontMono,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: tokens.transitions.fast
+            }}
+          >
+            <span style={{ fontSize: '11px' }}>▶</span>
+            <span>RESUME MEGH</span>
+          </button>
+        ) : (
+          <button
+            onClick={onEmergencyStop}
+            title="Emergency Stop: Halts TTS, cancels active model, and stops tool execution immediately"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: tokens.colors.semantic.errorMuted,
+              border: `1px solid ${tokens.colors.semantic.error}`,
+              borderRadius: tokens.radii.sm,
+              padding: '4px 10px',
+              color: '#f8b4b0',
+              fontSize: tokens.typography.sizes.xs,
+              fontFamily: tokens.typography.fontMono,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: tokens.transitions.fast
+            }}
+          >
+            <KillSwitchIcon size={12} color="#f8b4b0" />
+            <span>STOP MEGH</span>
+          </button>
+        )}
       </div>
     </header>
   );

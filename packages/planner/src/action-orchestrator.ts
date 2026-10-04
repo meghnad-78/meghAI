@@ -102,6 +102,15 @@ export class ActionOrchestrator {
   ) {
     this.confirmationManager = new ConfirmationManager();
     this.diagnosticsService = new ActionDiagnosticsService();
+
+    // Wire KillSwitch reset to clear cancelled plans
+    KillSwitch.onReset(() => {
+      this.clearCancelledPlans();
+    });
+  }
+
+  public clearCancelledPlans(): void {
+    this.cancelledPlanIds.clear();
   }
 
   public setDatabase(db: MeghAIDatabase): void {
@@ -141,7 +150,8 @@ export class ActionOrchestrator {
       /^(delete|remove|erase|clear)\s+/i,
       /^(move|rename|copy)\s+/i,
       /^(send|draft|reply|email|message)\s+/i,
-      /^(stop|cancel|halt|never\s*mind|abort|megh[,\s]+stop)$/i
+      /^(stop|cancel|halt|never\s*mind|abort|megh[,\s]+stop|stop\s+megh)$/i,
+      /^(resume\s+megh|enable\s+megh|clear\s+emergency\s+stop|unblock\s+megh)$/i
     ];
 
     return ACTION_TRIGGERS.some(r => r.test(strippedWake) || r.test(cleaned) || r.test(trimmed));
@@ -176,10 +186,63 @@ export class ActionOrchestrator {
   ): Promise<ActionExecutionResult> {
     const correlationId = options.commandId || options.requestId || `req-${Date.now()}`;
     const provenance: InputProvenance = options.provenance || 'USER';
-
-    // 1. Check Natural Language Universal Cancellation
     const trimmed = rawInput.trim().toLowerCase();
-    if (/^(stop|cancel|halt|never\s*mind|megh[,\s]+stop|abort)[\s.!]*$/i.test(trimmed)) {
+    const strippedWake = trimmed.replace(/^(hey\s+megh|megh|please)[,\s]*/i, '').trim();
+
+    // 0. Check Natural Language Emergency Stop Reset ("Resume Megh", "Enable Megh", "Clear emergency stop")
+    if (
+      /^(resume\s+megh|enable\s+megh|clear\s+emergency\s+stop|unblock\s+megh)[\s.!]*$/i.test(trimmed) ||
+      /^(resume\s+megh|enable\s+megh|clear\s+emergency\s+stop|unblock\s+megh)[\s.!]*$/i.test(strippedWake)
+    ) {
+      KillSwitch.reset('User requested reset via command');
+      this.clearCancelledPlans();
+      this.eventBus.publish('KILLSWITCH_RESET', {
+        reason: 'Reset via command',
+        source: provenance,
+        timestamp: new Date().toISOString()
+      }, correlationId);
+      this.eventBus.publish('KILL_SWITCH_RESET', {
+        reason: 'Reset via command',
+        source: provenance,
+        timestamp: new Date().toISOString()
+      }, correlationId);
+
+      const resetPlan: ActionPlan = {
+        planId: `plan-reset-${Date.now()}`,
+        requestId: correlationId,
+        userIntent: 'RESET_KILLSWITCH',
+        summary: 'Emergency stop cleared.',
+        steps: [],
+        estimatedRisk: 'LOW',
+        requiredPermissions: [],
+        requiresConfirmation: false,
+        reversible: true,
+        externalSideEffects: false,
+        createdAt: new Date().toISOString(),
+        status: 'SUCCEEDED',
+        provenance,
+        currentStepIndex: 0
+      };
+
+      return {
+        planId: resetPlan.planId,
+        status: 'SUCCEEDED',
+        state: 'COMPLETED',
+        summary: 'Emergency stop cleared.',
+        reply: 'Emergency stop cleared. MeghAI is now ready.',
+        plan: resetPlan,
+        steps: [],
+        diagnostics: [],
+        timelineCorrelationId: correlationId
+      };
+    }
+
+    // 1. Check Natural Language Universal Cancellation ("Stop", "Stop Megh", "Abort")
+    if (
+      /^(stop|cancel|halt|never\s*mind|megh[,\s]+stop|abort|stop\s+megh)[\s.!]*$/i.test(trimmed) ||
+      /^(stop|cancel|halt|never\s*mind|megh[,\s]+stop|abort|stop\s+megh)[\s.!]*$/i.test(strippedWake)
+    ) {
+      KillSwitch.stopMegh('Universal natural language stop');
       this.cancelAll();
       const cancelPlan: ActionPlan = {
         planId: `plan-cancel-${Date.now()}`,
@@ -1339,5 +1402,9 @@ export class ActionOrchestrator {
 
   public getCompletedPlans(): ActionPlan[] {
     return Array.from(this.completedPlans.values());
+  }
+
+  public getPlan(planId: string): ActionPlan | undefined {
+    return this.activePlans.get(planId) || this.completedPlans.get(planId);
   }
 }

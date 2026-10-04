@@ -164,8 +164,14 @@ export const App: React.FC = () => {
             soundEngine.startThinkingTexture();
           } else if (mEvt.type === 'MODEL_COMPLETED') {
             soundEngine.stopThinkingTexture();
-          } else if (mEvt.type === 'INTERRUPTED' || mEvt.type === 'KILL_SWITCH_ACTIVATED' || mEvt.type === 'TTS_INTERRUPTED') {
+          } else if (mEvt.type === 'KILLSWITCH_ACTIVATED' || mEvt.type === 'KILL_SWITCH_ACTIVATED' || mEvt.type === 'INTERRUPTED' || mEvt.type === 'TTS_INTERRUPTED') {
             soundEngine.playInterruption();
+            setAiState('STOPPED');
+            setSpeakingMsgId(null);
+          } else if (mEvt.type === 'KILLSWITCH_RESET' || mEvt.type === 'KILL_SWITCH_RESET') {
+            soundEngine.playWake();
+            setAiState('READY');
+            setSpeakingMsgId(null);
           } else if (mEvt.type === 'MIC_LEVEL') {
             const payload = mEvt.payload as { normalizedLevel?: number; rms?: number; peak?: number };
             setMicLevel(payload?.normalizedLevel ?? 0);
@@ -508,12 +514,25 @@ export const App: React.FC = () => {
     soundEngine.playInterruption();
     try {
       await fetch('/api/v1/system/kill', { method: 'POST' });
-      setAiState('CANCELLED');
+      setAiState('STOPPED');
       setMicState('MIC_OFF');
       setMicLevel(0);
       setSpeakingMsgId(null);
     } catch {
-      // Fallback
+      setAiState('STOPPED');
+    }
+  };
+
+  const handleResetEmergencyStop = async () => {
+    soundEngine.playWake();
+    try {
+      const res = await fetch('/api/v1/system/kill/reset', { method: 'POST' });
+      const data = await res.json() as any;
+      if (data.success) {
+        setAiState('READY');
+      }
+    } catch {
+      setAiState('READY');
     }
   };
 
@@ -592,6 +611,7 @@ export const App: React.FC = () => {
         onOpenPersonalitySelector={() => setIsPersonalitySelectorOpen(true)}
         onToggleTimeline={() => setIsTimelineOpen(prev => !prev)}
         onEmergencyStop={handleEmergencyStop}
+        onResetEmergencyStop={handleResetEmergencyStop}
       />
 
       {/* Main Workspace Frame */}
