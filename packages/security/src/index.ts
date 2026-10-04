@@ -92,6 +92,8 @@ export class SecretRedactor {
   }
 }
 
+import os from 'node:os';
+
 /**
  * Path Validator & Traversal Defense (Section 49 & 129)
  */
@@ -105,19 +107,44 @@ export class PathValidator {
     'c:\\system volume information'
   ];
 
+  public static getStandardSafeRoots(customWorkspaceDir?: string): string[] {
+    const home = os.homedir();
+    const roots = [
+      path.join(home, 'Documents'),
+      path.join(home, 'Downloads'),
+      path.join(home, 'Desktop'),
+      path.join(home, 'Pictures'),
+      path.join(home, 'Videos'),
+      path.join(home, 'MeghAI'),
+      home,
+      customWorkspaceDir ? path.resolve(customWorkspaceDir) : path.resolve('.')
+    ];
+    // De-duplicate and normalize
+    return Array.from(new Set(roots.map(r => path.resolve(r))));
+  }
+
   public static validatePath(targetPath: string, allowedRoots: string[]): { isSafe: boolean; normalizedPath: string; error?: string } {
     try {
-      const normalized = path.resolve(targetPath);
-      const lower = normalized.toLowerCase();
-
-      // 1. Check traversal characters
-      if (targetPath.includes('..')) {
-        // Double check resolved vs allowed
+      if (!targetPath || typeof targetPath !== 'string') {
+        return { isSafe: false, normalizedPath: '', error: 'File path must be a non-empty string.' };
       }
+
+      const trimmed = targetPath.trim();
+
+      // 1. Check unexpected UNC and Device Paths
+      if (trimmed.startsWith('\\\\?\\') || trimmed.startsWith('\\\\.\\')) {
+        return { isSafe: false, normalizedPath: trimmed, error: 'Device namespace paths are prohibited for security.' };
+      }
+      if (trimmed.startsWith('\\\\') || trimmed.startsWith('//')) {
+        return { isSafe: false, normalizedPath: trimmed, error: 'UNC network paths are prohibited for security.' };
+      }
+
+      const normalized = path.resolve(trimmed);
+      const lower = normalized.toLowerCase();
 
       // 2. Check denied system directories
       for (const denied of this.DENIED_WINDOWS_PATHS) {
-        if (lower === denied || lower.startsWith(denied + '\\')) {
+        if (lower === denied || lower.startsWith(denied + '\\') || lower.startsWith(denied + '/')) {
           return { isSafe: false, normalizedPath: normalized, error: `Access denied to protected Windows system location: ${denied}` };
         }
       }
@@ -130,7 +157,7 @@ export class PathValidator {
         });
 
         if (!inAllowed) {
-          return { isSafe: false, normalizedPath: normalized, error: `Path is outside permitted root directories.` };
+          return { isSafe: false, normalizedPath: normalized, error: `Path '${normalized}' is outside permitted root directories.` };
         }
       }
 
@@ -138,6 +165,11 @@ export class PathValidator {
     } catch (err) {
       return { isSafe: false, normalizedPath: targetPath, error: `Invalid file path: ${(err as Error).message}` };
     }
+  }
+
+  public static isPathAllowed(targetPath: string, allowedRoots?: string[]): boolean {
+    const roots = allowedRoots && allowedRoots.length > 0 ? allowedRoots : this.getStandardSafeRoots();
+    return this.validatePath(targetPath, roots).isSafe;
   }
 }
 
@@ -213,6 +245,13 @@ export class KillSwitch {
   public static onKill(listener: (reason: string) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  public static trigger(reason = 'Emergency Kill Switch Triggered by User'): {
+    cancelledControllers: number;
+    killedProcesses: number;
+  } {
+    return this.stopMegh(reason);
   }
 
   public static stopMegh(reason = 'Emergency Kill Switch Triggered by User'): {

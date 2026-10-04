@@ -19,7 +19,8 @@
     "@meghai/model-router": "*",
     "@meghai/memory": "*",
     "@meghai/windows": "*",
-    "@meghai/config": "*"
+    "@meghai/config": "*",
+    "@meghai/planner": "*"
   },
   "scripts": {
     "build": "tsc",

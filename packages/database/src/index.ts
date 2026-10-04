@@ -194,6 +194,30 @@ export class MeghAIDatabase {
     return this.state.tasks.filter(t => t.status === status);
   }
 
+  public async getTask(id: string): Promise<TaskEntry | null> {
+    await this.init();
+    return this.state.tasks.find(t => t.id === id) || null;
+  }
+
+  public async updateTaskStatus(id: string, status: import('@meghai/shared-types').TaskState): Promise<TaskEntry | null> {
+    await this.init();
+    const task = this.state.tasks.find(t => t.id === id);
+    if (!task) return null;
+    task.status = status;
+    task.updatedAt = new Date().toISOString();
+    await this.persistState();
+    return task;
+  }
+
+  public async deleteTask(id: string): Promise<boolean> {
+    await this.init();
+    const index = this.state.tasks.findIndex(t => t.id === id);
+    if (index === -1) return false;
+    this.state.tasks.splice(index, 1);
+    await this.persistState();
+    return true;
+  }
+
   // ---------------------------------------------------------------------------
   // Memory Subsystem
   // ---------------------------------------------------------------------------

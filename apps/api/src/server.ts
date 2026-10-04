@@ -33,6 +33,7 @@ import { IntegrationRegistry } from '@meghai/integrations';
 import { ObservabilityService } from '@meghai/observability';
 import { KillSwitch, PathValidator, IPCSecurity } from '@meghai/security';
 import { saveProviderCredential, loadStoredCredentials, loadConfig, ModelSettingsManager, ModelSettings } from '@meghai/config';
+import { ActionOrchestrator } from '@meghai/planner';
 import type {
   AIState,
   ToolCallRequest,
@@ -52,6 +53,7 @@ export class MeghAIServer {
   public permissionBroker: PermissionBroker;
   public toolRegistry: ToolRegistry;
   public toolRuntime: ToolRuntime;
+  public actionOrchestrator: ActionOrchestrator;
   public modelRouter: ModelRouter;
   public memoryManager: MemoryManager;
   public contextEngine: ContextEngine;
@@ -87,7 +89,14 @@ export class MeghAIServer {
       path.resolve('.')
     ]);
     this.toolRegistry = new ToolRegistry();
-    this.toolRuntime = new ToolRuntime(this.toolRegistry, this.permissionBroker);
+    this.toolRuntime = new ToolRuntime(this.toolRegistry, this.permissionBroker, this.db);
+    this.actionOrchestrator = new ActionOrchestrator(
+      this.toolRegistry,
+      this.toolRuntime,
+      this.permissionBroker,
+      this.eventBus,
+      this.db
+    );
     this.modelRouter = new ModelRouter();
     this.memoryManager = new MemoryManager(this.db);
     this.contextEngine = new ContextEngine(this.memoryManager, this.permissionBroker);
@@ -539,7 +548,108 @@ export class MeghAIServer {
             }
           }
 
-          // Permissions
+          // Safety / Permissions Center & Autonomy Policy (MEGHAI v0.4.1)
+          if (pathname === '/api/v1/permissions/policy') {
+            if (req.method === 'GET') {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                autonomyLevel: this.permissionBroker.getAutonomyLevel(),
+                policy: this.permissionBroker.getAutonomyPolicy(),
+                allowedRoots: this.permissionBroker.getAllowedRoots(),
+                sessionGrants: this.permissionBroker.listSessionGrants(),
+                persistentGrants: this.permissionBroker.listPersistentGrants(),
+                userOverrides: this.permissionBroker.getUserOverrides(),
+                recentDecisions: this.permissionBroker.getRecentDecisions(50),
+                grants: this.permissionBroker.listGrants()
+              }));
+              return;
+            }
+          }
+
+          if (pathname === '/api/v1/permissions/autonomy-level') {
+            if (req.method === 'POST') {
+              const body = await this.readJsonBody(req) as any;
+              let level = body.level || body.autonomyLevel;
+              if (level === 'MANUAL_CONFIRMATION_ONLY' || level === 'STRICT_SAFETY') {
+                level = 'STRICT_CONFIRMATION';
+              }
+              this.permissionBroker.setAutonomyLevel(level);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                success: true,
+                autonomyLevel: this.permissionBroker.getAutonomyLevel()
+              }));
+              return;
+            }
+          }
+
+          if (pathname === '/api/v1/permissions/session-grant') {
+            if (req.method === 'POST') {
+              const body = await this.readJsonBody(req) as any;
+              const grant = this.permissionBroker.createSessionGrant(
+                body.toolId || body.scope,
+                body.targetRoot || body.target,
+                body.durationMs || 60000,
+                body.sessionId || 'api-session'
+              );
+              res.writeHead(201, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(grant));
+              return;
+            }
+            if (req.method === 'DELETE') {
+              const body = await this.readJsonBody(req).catch(() => ({})) as any;
+              this.permissionBroker.clearSessionGrants(body.sessionId);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true }));
+              return;
+            }
+          }
+
+          if (pathname === '/api/v1/permissions/persistent-grant') {
+            if (req.method === 'POST') {
+              const body = await this.readJsonBody(req) as any;
+              const grant = this.permissionBroker.addPersistentGrant(
+                body.toolId || body.capability,
+                body.targetPattern || body.targetRoot,
+                body.grantedBy || 'user'
+              );
+              res.writeHead(201, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(grant));
+              return;
+            }
+            if (req.method === 'DELETE') {
+              const body = await this.readJsonBody(req).catch(() => ({})) as any;
+              const grantId = body.grantId || body.id;
+              const success = this.permissionBroker.revokePersistentGrant(grantId);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success }));
+              return;
+            }
+          }
+
+          if (pathname === '/api/v1/permissions/override') {
+            if (req.method === 'POST') {
+              const body = await this.readJsonBody(req) as any;
+              this.permissionBroker.setUserOverride(body.toolId || body.key, body.rule || body.value);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                success: true,
+                overrides: this.permissionBroker.getUserOverrides()
+              }));
+              return;
+            }
+            if (req.method === 'DELETE') {
+              const body = await this.readJsonBody(req).catch(() => ({})) as any;
+              this.permissionBroker.clearUserOverride(body.toolId || body.key);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                success: true,
+                overrides: this.permissionBroker.getUserOverrides()
+              }));
+              return;
+            }
+          }
+
           if (pathname === '/api/v1/permissions') {
             if (req.method === 'GET') {
               res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1129,6 +1239,70 @@ export class MeghAIServer {
             }
           }
 
+          // -----------------------------------------------------------------
+          // Universal Action Engine Endpoints (v0.4.0)
+          // -----------------------------------------------------------------
+          if (pathname === '/api/v1/tools' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(this.toolRegistry.list()));
+            return;
+          }
+
+          if (pathname === '/api/v1/actions/plan' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { input: string };
+            const plan = await this.actionOrchestrator.generatePlan(body.input, `plan-req-${Date.now()}`, 'USER');
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(plan));
+            return;
+          }
+
+          if (pathname === '/api/v1/actions/execute' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { input: string; userConfirmed?: boolean };
+            const result = await this.actionOrchestrator.process(body.input, { userConfirmed: body.userConfirmed });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+            return;
+          }
+
+          if (pathname === '/api/v1/actions/confirm' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { token: string };
+            const result = await this.actionOrchestrator.confirmAndExecute(body.token);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(result));
+            return;
+          }
+
+          if (pathname === '/api/v1/actions/cancel' && req.method === 'POST') {
+            const body = await this.readJsonBody(req) as { planId?: string };
+            if (body.planId) {
+              const cancelled = this.actionOrchestrator.cancel(body.planId);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: cancelled, planId: body.planId }));
+            } else {
+              this.actionOrchestrator.cancelAll();
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: true, message: 'All active actions cancelled' }));
+            }
+            return;
+          }
+
+          if (pathname === '/api/v1/actions/active' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(this.actionOrchestrator.getActivePlans()));
+            return;
+          }
+
+          if (pathname === '/api/v1/actions/history' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(this.actionOrchestrator.getCompletedPlans()));
+            return;
+          }
+
+          if (pathname === '/api/v1/actions/diagnostics' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(this.actionOrchestrator.diagnosticsService.getHistory(50)));
+            return;
+          }
 
           // Core Input Processing Endpoint: /api/v1/input/process
           if (pathname === '/api/v1/input/process' && req.method === 'POST') {
@@ -1443,6 +1617,43 @@ export class MeghAIServer {
         } catch {}
       }
       return response;
+    }
+
+    // Universal Action Engine (v0.4.0)
+    const textToCheck = pipeline.normalizedText || rawText;
+    if (this.actionOrchestrator.isActionRequest(rawText) || this.actionOrchestrator.isActionRequest(textToCheck)) {
+      this.setAIState('PLANNING');
+      const actionResult = await this.actionOrchestrator.process(textToCheck, {
+        commandId: meta?.commandId,
+        voiceSessionId: meta?.voiceSessionId,
+        source: meta?.source || 'TEXT',
+        userConfirmed
+      });
+
+      if (actionResult.status === 'WAITING_FOR_USER' || actionResult.state === 'WAITING_FOR_CONFIRMATION') {
+        this.setAIState('WAITING_FOR_CONFIRMATION');
+      } else {
+        this.setAIState('READY');
+      }
+
+      this.eventBus.publish('TASK_COMPLETED', {
+        ...actionResult,
+        voiceSessionId: meta?.voiceSessionId,
+        commandId: meta?.commandId
+      }, correlationId);
+
+      if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
+        try {
+          await this.speakResponse(actionResult.reply, correlationId);
+        } catch {}
+      }
+
+      return {
+        ...actionResult,
+        status: actionResult.status === 'SUCCEEDED' ? 'COMPLETED' : actionResult.status,
+        verificationStatus: actionResult.status === 'SUCCEEDED' ? 'VERIFIED' : 'FAILED',
+        timelineCorrelationId: correlationId
+      };
     }
 
     // C. File Search ("Megh, find my resume" / "find *.pdf")

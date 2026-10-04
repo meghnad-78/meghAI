@@ -6,7 +6,15 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
-    "@meghai/shared-types": "*"
+    "@meghai/shared-types": "*",
+    "@meghai/tool-registry": "*",
+    "@meghai/tool-runtime": "*",
+    "@meghai/permissions": "*",
+    "@meghai/risk-engine": "*",
+    "@meghai/verification": "*",
+    "@meghai/security": "*",
+    "@meghai/events": "*",
+    "@meghai/database": "*"
   },
   "scripts": {
     "build": "tsc",

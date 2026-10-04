@@ -338,3 +338,6 @@ export class TaskContinuityStore {
     return Array.from(this.plans.values()).filter(p => p.status === 'RUNNING' || p.status === 'QUEUED');
   }
 }
+
+export * from './action-orchestrator.js';
+

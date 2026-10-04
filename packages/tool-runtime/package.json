@@ -11,7 +11,10 @@
     "@meghai/permissions": "*",
     "@meghai/risk-engine": "*",
     "@meghai/verification": "*",
-    "@meghai/tool-registry": "*"
+    "@meghai/tool-registry": "*",
+    "@meghai/windows": "*",
+    "@meghai/browser": "*",
+    "@meghai/database": "*"
   },
   "scripts": {
     "build": "tsc",

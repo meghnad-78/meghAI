@@ -6,7 +6,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "dependencies": {
-    "@meghai/shared-types": "*"
+    "@meghai/shared-types": "*",
+    "@meghai/security": "*"
   },
   "scripts": {
     "build": "tsc",

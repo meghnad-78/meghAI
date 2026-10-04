@@ -154,3 +154,139 @@ export class RiskEngine {
     return ranks[target] > ranks[current] ? target : current;
   }
 }
+
+import type { ActionConfirmationRequest } from '@meghai/shared-types';
+
+/**
+ * Central Confirmation Policy Manager (Section 6 & 61)
+ * Enforces explicit user confirmation for high-risk, destructive, or external communication actions.
+ */
+export class ConfirmationManager {
+  private pendingRequests = new Map<string, ActionConfirmationRequest>();
+  private confirmedPlans = new Set<string>();
+  private confirmedTokens = new Set<string>();
+
+  /**
+   * Determine if an action category and risk level strictly requires confirmation.
+   */
+  public static requiresConfirmation(
+    toolName: string,
+    riskLevel: RiskLevel,
+    isDestructive = false,
+    isExternalCommunication = false
+  ): boolean {
+    const lower = toolName.toLowerCase();
+
+    // Never require confirmation for read-only or safe navigation/launch actions
+    if (
+      lower.includes('read') ||
+      lower.includes('list') ||
+      lower.includes('search') ||
+      lower.includes('open_app') ||
+      lower.includes('launch') ||
+      lower.includes('open_url') ||
+      lower.includes('calc') ||
+      lower.includes('get_')
+    ) {
+      return false;
+    }
+
+    // High risk, critical, destructive, or external send operations ALWAYS require confirmation
+    if (riskLevel === 'HIGH' || riskLevel === 'CRITICAL' || isDestructive) {
+      return true;
+    }
+
+    if (isExternalCommunication && (lower.includes('send') || lower.includes('publish') || lower.includes('post'))) {
+      return true;
+    }
+
+    // Destructive keywords
+    if (lower.includes('delete') || lower.includes('remove') || lower.includes('drop') || lower.includes('truncate')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  public createRequest(params: {
+    planId: string;
+    stepId?: string;
+    actionSummary: string;
+    target: string;
+    riskLevel: RiskLevel;
+    reversible: boolean;
+    impact: string;
+  }): ActionConfirmationRequest {
+    const token = `conf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 5 * 60 * 1000).toISOString(); // 5 min expiry
+
+    const request: ActionConfirmationRequest = {
+      planId: params.planId,
+      stepId: params.stepId,
+      actionSummary: params.actionSummary,
+      target: params.target,
+      riskLevel: params.riskLevel,
+      reversible: params.reversible,
+      impact: params.impact,
+      requiresExplicitConfirmation: true,
+      confirmationToken: token,
+      createdAt: now.toISOString(),
+      expiresAt
+    };
+
+    this.pendingRequests.set(token, request);
+    return request;
+  }
+
+  public confirm(token: string): boolean {
+    const req = this.pendingRequests.get(token);
+    if (!req) return false;
+
+    // Check expiration
+    if (new Date() > new Date(req.expiresAt)) {
+      this.pendingRequests.delete(token);
+      return false;
+    }
+
+    this.confirmedTokens.add(token);
+    this.confirmedPlans.add(req.planId);
+    if (req.stepId) {
+      this.confirmedPlans.add(`${req.planId}:${req.stepId}`);
+    }
+    this.pendingRequests.delete(token);
+    return true;
+  }
+
+  public reject(token: string): boolean {
+    return this.pendingRequests.delete(token);
+  }
+
+  public isPlanConfirmed(planId: string, stepId?: string): boolean {
+    if (this.confirmedPlans.has(planId)) return true;
+    if (stepId && this.confirmedPlans.has(`${planId}:${stepId}`)) return true;
+    return false;
+  }
+
+  public getPendingRequests(): ActionConfirmationRequest[] {
+    const now = new Date();
+    // Clean expired
+    for (const [token, req] of this.pendingRequests.entries()) {
+      if (now > new Date(req.expiresAt)) {
+        this.pendingRequests.delete(token);
+      }
+    }
+    return Array.from(this.pendingRequests.values());
+  }
+
+  public getRequestByToken(token: string): ActionConfirmationRequest | undefined {
+    return this.pendingRequests.get(token);
+  }
+
+  public clear(): void {
+    this.pendingRequests.clear();
+    this.confirmedPlans.clear();
+    this.confirmedTokens.clear();
+  }
+}
+

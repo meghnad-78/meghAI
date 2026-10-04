@@ -112,6 +112,150 @@ export class VerificationEngine {
   }
 
   /**
+   * Verify file existence.
+   */
+  public static async verifyFileExists(filePath: string): Promise<VerificationResult> {
+    const timestamp = new Date().toISOString();
+    try {
+      const stats = await fs.stat(filePath);
+      if (stats.isFile()) {
+        return {
+          status: 'VERIFIED',
+          proof: `file_size:${stats.size}`,
+          details: `File verified to exist at '${filePath}' (${stats.size} bytes).`,
+          timestamp
+        };
+      }
+      return {
+        status: 'FAILED',
+        details: `Path '${filePath}' exists but is not a regular file.`,
+        timestamp
+      };
+    } catch {
+      return {
+        status: 'FAILED',
+        details: `Verification failed: File '${filePath}' does not exist on disk.`,
+        timestamp
+      };
+    }
+  }
+
+  /**
+   * Verify file or folder has been deleted (is absent from disk).
+   */
+  public static async verifyFileAbsent(filePath: string): Promise<VerificationResult> {
+    const timestamp = new Date().toISOString();
+    try {
+      await fs.stat(filePath);
+      return {
+        status: 'FAILED',
+        details: `Verification failed: Target '${filePath}' still exists on disk after deletion.`,
+        timestamp
+      };
+    } catch {
+      return {
+        status: 'VERIFIED',
+        proof: `absent:${filePath}`,
+        details: `Target verified to be absent from disk at '${filePath}'.`,
+        timestamp
+      };
+    }
+  }
+
+  /**
+   * Verify directory existence.
+   */
+  public static async verifyFolderExists(folderPath: string): Promise<VerificationResult> {
+    const timestamp = new Date().toISOString();
+    try {
+      const stats = await fs.stat(folderPath);
+      if (stats.isDirectory()) {
+        return {
+          status: 'VERIFIED',
+          proof: `dir:${folderPath}`,
+          details: `Directory verified to exist at '${folderPath}'.`,
+          timestamp
+        };
+      }
+      return {
+        status: 'FAILED',
+        details: `Path '${folderPath}' exists but is not a directory.`,
+        timestamp
+      };
+    } catch {
+      return {
+        status: 'FAILED',
+        details: `Verification failed: Directory '${folderPath}' does not exist on disk.`,
+        timestamp
+      };
+    }
+  }
+
+  /**
+   * Verify process or application launch.
+   */
+  public static verifyProcessLaunch(appName: string, pid?: number): VerificationResult {
+    const timestamp = new Date().toISOString();
+    if (pid && pid > 0) {
+      return {
+        status: 'VERIFIED',
+        proof: `pid:${pid}`,
+        details: `Process '${appName}' successfully launched with PID ${pid}.`,
+        timestamp
+      };
+    }
+    return {
+      status: 'UNVERIFIED',
+      details: `Application '${appName}' was triggered, but process PID could not be confirmed.`,
+      timestamp
+    };
+  }
+
+  /**
+   * Verify browser navigation URL or title.
+   */
+  public static verifyBrowserState(expected: string, actualUrl: string, actualTitle: string): VerificationResult {
+    const timestamp = new Date().toISOString();
+    const matchesUrl = actualUrl.toLowerCase().includes(expected.toLowerCase());
+    const matchesTitle = actualTitle.toLowerCase().includes(expected.toLowerCase());
+
+    if (matchesUrl || matchesTitle) {
+      return {
+        status: 'VERIFIED',
+        proof: `url:${actualUrl}`,
+        details: `Browser state matches '${expected}' (Title: "${actualTitle}", URL: "${actualUrl}").`,
+        timestamp
+      };
+    }
+
+    return {
+      status: 'FAILED',
+      details: `Browser state does not match expected '${expected}'. Current URL: '${actualUrl}', Title: '${actualTitle}'.`,
+      timestamp
+    };
+  }
+
+  /**
+   * Verify process exit code.
+   */
+  public static verifyExitCode(exitCode: number, expectedCode = 0): VerificationResult {
+    const timestamp = new Date().toISOString();
+    if (exitCode === expectedCode) {
+      return {
+        status: 'VERIFIED',
+        proof: `exitCode:${exitCode}`,
+        details: `Process terminated with expected exit code ${exitCode}.`,
+        timestamp
+      };
+    }
+    return {
+      status: 'FAILED',
+      details: `Process exited with code ${exitCode}, expected ${expectedCode}.`,
+      timestamp
+    };
+  }
+
+  /**
    * Fallback verification when outcome cannot be independently checked.
    */
   public static markUnverified(strategy: VerificationStrategy, reason: string): VerificationResult {
@@ -122,3 +266,4 @@ export class VerificationEngine {
     };
   }
 }
+

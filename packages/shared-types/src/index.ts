@@ -99,6 +99,87 @@ export interface PermissionGrant {
   updatedAt: string;
 }
 
+export type AutonomyLevel =
+  | 'STRICT_CONFIRMATION'
+  | 'FULL_SAFE_AUTOMATION'
+  | 'DEVELOPER_AUTOMATION';
+
+export type PermissionDecision = 'ALLOW' | 'REQUIRE_CONFIRMATION' | 'BLOCK';
+
+export interface PermissionExplanation {
+  what: string;
+  target: string;
+  impact: string;
+  reversibility: boolean;
+}
+
+export interface PermissionEvaluationResult {
+  decision: PermissionDecision;
+  granted: boolean;
+  requiresConfirmation: boolean;
+  reason: string;
+  ruleMatched?: string;
+  effectiveRisk?: RiskLevel;
+  autoAuthorized?: boolean;
+  policyRule?: string;
+  riskLevel?: RiskLevel;
+  scope?: PermissionScope | string;
+  target?: string;
+  explanation?: PermissionExplanation;
+}
+
+export interface SessionPermissionGrant {
+  id: string;
+  sessionId: string;
+  scope: PermissionScope | string;
+  toolId?: string;
+  target?: string;
+  targetRoot?: string;
+  riskCeiling: RiskLevel;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface PersistentPermissionGrant {
+  id: string;
+  capability: string; // e.g., 'windows.delete_file', 'filesystem.write'
+  toolId?: string;
+  scope: PermissionScope | string;
+  targetPattern?: string;
+  targetRoot?: string;
+  grantedBy?: string;
+  createdAt: string;
+  revoked?: boolean;
+}
+
+export interface TrustedRoutineDefinition {
+  id: string;
+  name: string;
+  allowedTools: string[];
+  allowedScopes: (PermissionScope | string)[];
+  enabled: boolean;
+}
+
+export interface AutonomousExecutionPolicy {
+  level: AutonomyLevel;
+  defaultAutoAllowTools: string[];
+  trustedRoots: string[];
+  confirmationRequiredTools: string[];
+  hardBlockedTools: string[];
+  userOverrides: Record<string, 'ASK' | 'ALLOW' | 'DENY'>;
+}
+
+export interface PermissionAutoGrantedPayload {
+  requestId?: string;
+  planId?: string;
+  stepId?: string;
+  toolId: string;
+  risk: RiskLevel | string;
+  scope: PermissionScope | string;
+  policyRule: string;
+  timestamp: string;
+}
+
 // ---------------------------------------------------------------------------
 // 5. Input Pipeline & Multimodal Content (Section 14 & 15)
 // ---------------------------------------------------------------------------
@@ -500,7 +581,27 @@ export type EventType =
   | 'MODEL_SETTINGS_CHANGED'
   | 'PERSONALITY_SETTINGS_CHANGED'
   | 'WAKE_ACTIVATION_STARTED'
-  | 'AI_STATE_CHANGED';
+  | 'AI_STATE_CHANGED'
+  | 'ACTION_PLAN_CREATED'
+  | 'ACTION_PERMISSION_REQUESTED'
+  | 'ACTION_PERMISSION_GRANTED'
+  | 'ACTION_PERMISSION_DENIED'
+  | 'PERMISSION_AUTO_GRANTED'
+  | 'ACTION_STEP_STARTED'
+  | 'ACTION_TOOL_SELECTED'
+  | 'ACTION_TOOL_STARTED'
+  | 'ACTION_TOOL_COMPLETED'
+  | 'ACTION_TOOL_FAILED'
+  | 'ACTION_VERIFICATION_STARTED'
+  | 'ACTION_VERIFIED'
+  | 'ACTION_VERIFICATION_FAILED'
+  | 'ACTION_RETRY'
+  | 'ACTION_WAITING_FOR_USER'
+  | 'CONFIRMATION_REQUIRED'
+  | 'ACTION_CANCELLED'
+  | 'ACTION_PLAN_COMPLETED'
+  | 'ACTION_PLAN_PARTIAL'
+  | 'ACTION_PLAN_FAILED';
 
 export interface MeghAIEvent<T = unknown> {
   id: string;
@@ -919,4 +1020,188 @@ export interface CostSummary {
   cloudOperationsCount: number;
   zeroCostSavingsInr: number;
 }
+
+// ---------------------------------------------------------------------------
+// 14. Universal Action Engine (v0.4.0)
+// ---------------------------------------------------------------------------
+export type ActionRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+export type ActionStatus =
+  | 'PLANNED'
+  | 'WAITING_FOR_PERMISSION'
+  | 'AUTHORIZED'
+  | 'RUNNING'
+  | 'WAITING_FOR_USER'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'VERIFICATION_FAILED'
+  | 'CANCELLED'
+  | 'BLOCKED'
+  | 'TIMED_OUT'
+  | 'PARTIALLY_COMPLETED';
+
+export type ActionStateMachineState =
+  | 'IDLE'
+  | 'UNDERSTANDING'
+  | 'PLANNING'
+  | 'AUTHORIZING'
+  | 'WAITING_FOR_CONFIRMATION'
+  | 'EXECUTING'
+  | 'VERIFYING'
+  | 'COMPLETED'
+  | 'PARTIALLY_COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export type InputProvenance =
+  | 'USER'
+  | 'SYSTEM'
+  | 'MEGHAI'
+  | 'EXTERNAL_WEB'
+  | 'EXTERNAL_EMAIL'
+  | 'EXTERNAL_DOCUMENT'
+  | 'TOOL_OUTPUT';
+
+export interface ActionRetryPolicy {
+  maxRetries: number;
+  backoffMs: number;
+  retriesRemaining: number;
+}
+
+export interface ActionStepVerificationResult {
+  status: 'VERIFIED' | 'UNVERIFIED' | 'FAILED';
+  proof?: string;
+  details: string;
+  timestamp: string;
+}
+
+export interface ActionStep {
+  stepId: string;
+  toolId: string;
+  arguments: Record<string, unknown>;
+  expectedOutcome: string;
+  risk: ActionRiskLevel;
+  permission: PermissionScope | string;
+  timeout: number;
+  retryPolicy?: ActionRetryPolicy;
+  verificationStrategy: VerificationStrategy;
+  status: ActionStatus;
+  result?: unknown;
+  verificationResult?: ActionStepVerificationResult;
+  error?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface ActionPlan {
+  planId: string;
+  requestId: string;
+  userIntent: string;
+  summary: string;
+  steps: ActionStep[];
+  estimatedRisk: ActionRiskLevel;
+  requiredPermissions: (PermissionScope | string)[];
+  requiresConfirmation: boolean;
+  confirmationReason?: string;
+  reversible: boolean;
+  externalSideEffects: boolean;
+  createdAt: string;
+  expiresAt?: string;
+  status: ActionStatus;
+  provenance: InputProvenance;
+  currentStepIndex: number;
+  idempotencyKey?: string;
+  userConfirmed?: boolean;
+}
+
+export interface ActionConfirmationRequest {
+  planId: string;
+  stepId?: string;
+  actionSummary: string;
+  target: string;
+  riskLevel: ActionRiskLevel;
+  reversible: boolean;
+  impact: string;
+  requiresExplicitConfirmation: boolean;
+  confirmationToken: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface ActionDiagnostics {
+  requestId: string;
+  planId: string;
+  currentStep?: string;
+  toolId?: string;
+  risk?: ActionRiskLevel;
+  permission?: string;
+  startTime: number;
+  endTime?: number;
+  duration?: number;
+  provider?: string;
+  argumentsHash?: string;
+  resultSummary?: string;
+  verification?: string;
+  error?: string;
+  retryCount?: number;
+  fallback?: boolean;
+  userConfirmation?: boolean;
+  status: ActionStatus;
+}
+
+export type AdapterStatus =
+  | 'IMPLEMENTED'
+  | 'AVAILABLE'
+  | 'NOT_CONNECTED'
+  | 'BLOCKED'
+  | 'UNAVAILABLE'
+  | 'FAILED'
+  | 'PARTIALLY_IMPLEMENTED'
+  | 'ARCHITECTURE_ONLY';
+
+export interface CalendarEventEntry {
+  id: string;
+  title: string;
+  date: string;
+  time?: string;
+  durationMinutes?: number;
+  location?: string;
+  description?: string;
+  participants?: string[];
+  recurrence?: string;
+  status?: string;
+}
+
+export interface EmailMessageEntry {
+  id: string;
+  subject: string;
+  to: string[];
+  from?: string;
+  body: string;
+  threadId?: string;
+  draft?: boolean;
+  sentAt?: string;
+  receivedAt?: string;
+  attachments?: Array<{ name: string; path: string; size: number }>;
+}
+
+export interface InstantMessageEntry {
+  id: string;
+  platform: 'whatsapp' | 'telegram' | 'slack' | 'discord' | 'sms';
+  recipient: string;
+  content: string;
+  sentAt?: string;
+  status: 'DRAFT' | 'SENT' | 'FAILED' | 'CONFIRMATION_REQUIRED';
+}
+
+export interface ShellExecutionResult {
+  command: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timedOut: boolean;
+  verified: boolean;
+}
+
 
