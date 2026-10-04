@@ -1,5 +1,5 @@
 /**
- * MeghAI Master Design System Tokens
+ * MeghAI Master Design System Tokens — v0.4.1
  * Architectural Art Direction: Dark Mineral Computational Environment
  * Restrained Palette, Pure Hairline Depth, Precision Instrumentation
  */
@@ -20,7 +20,7 @@ export const tokens = {
 
     // Hairline Architectural Dividers & Outlines (No drop shadows)
     border: {
-      subtle: 'rgba(255, 255, 255, 0.05)',
+      subtle: 'rgba(255, 255, 255, 0.045)',
       default: 'rgba(255, 255, 255, 0.08)',
       strong: 'rgba(255, 255, 255, 0.15)',
       focus: 'rgba(79, 168, 181, 0.45)',

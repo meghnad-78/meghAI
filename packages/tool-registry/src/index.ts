@@ -1,4 +1,4 @@
-import type { ToolDefinition, ToolCategory } from '@meghai/shared-types';
+﻿import type { ToolDefinition, ToolCategory } from '@meghai/shared-types';
 
 /**
  * Authoritative Tool Registry (Section 43)
@@ -700,9 +700,25 @@ export class ToolRegistry {
         verificationStrategy: 'NONE'
       },
       {
-        name: 'browser.search',
+        name: 'web.search',
         version: '1.0.0',
-        description: 'Search the web for a query and return top results safely.',
+        description: 'Search the web for a query and return top results safely (Backend Information Retrieval, does NOT open a visible browser).',
+        category: 'BROWSER',
+        inputSchema: {
+          type: 'object',
+          properties: { query: { type: 'string' } },
+          required: ['query']
+        },
+        requiredPermissions: ['BROWSER'],
+        riskLevel: 'LOW',
+        allowedAgents: ['*'],
+        timeoutMs: 20000,
+        verificationStrategy: 'NONE'
+      },
+      {
+        name: 'browser.search_in_page',
+        version: '1.0.0',
+        description: 'Navigate the visible active browser tab to a search engine with the query. Use this when the user explicitly asks to "open chrome and search".',
         category: 'BROWSER',
         inputSchema: {
           type: 'object',
@@ -822,6 +838,70 @@ export class ToolRegistry {
         allowedAgents: ['*'],
         timeoutMs: 5000,
         verificationStrategy: 'NONE'
+      },
+      {
+        name: 'browser.click',
+        version: '1.0.0',
+        description: 'Click a DOM element on the actual current page.',
+        category: 'BROWSER',
+        inputSchema: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] },
+        requiredPermissions: ['BROWSER'], riskLevel: 'LOW', allowedAgents: ['*'], timeoutMs: 15000, verificationStrategy: 'NONE'
+      },
+      {
+        name: 'browser.click_first_result',
+        version: '1.0.0',
+        description: 'Click the first organic search result on the current page.',
+        category: 'BROWSER',
+        inputSchema: { type: 'object', properties: {} },
+        requiredPermissions: ['BROWSER'], riskLevel: 'LOW', allowedAgents: ['*'], timeoutMs: 15000, verificationStrategy: 'NONE'
+      },
+      {
+        name: 'browser.type',
+        version: '1.0.0',
+        description: 'Type text into a DOM element on the current page.',
+        category: 'BROWSER',
+        inputSchema: { type: 'object', properties: { selector: { type: 'string' }, text: { type: 'string' } }, required: ['selector', 'text'] },
+        requiredPermissions: ['BROWSER'], riskLevel: 'LOW', allowedAgents: ['*'], timeoutMs: 15000, verificationStrategy: 'NONE'
+      },
+      {
+        name: 'browser.scroll',
+        version: '1.0.0',
+        description: 'Scroll the active browser tab.',
+        category: 'BROWSER',
+        inputSchema: { type: 'object', properties: { direction: { type: 'string', enum: ['up', 'down'] } }, required: ['direction'] },
+        requiredPermissions: ['BROWSER'], riskLevel: 'LOW', allowedAgents: ['*'], timeoutMs: 5000, verificationStrategy: 'NONE'
+      },
+      {
+        name: 'browser.wait',
+        version: '1.0.0',
+        description: 'Wait for a specified number of milliseconds.',
+        category: 'BROWSER',
+        inputSchema: { type: 'object', properties: { ms: { type: 'number' } }, required: ['ms'] },
+        requiredPermissions: ['BROWSER'], riskLevel: 'LOW', allowedAgents: ['*'], timeoutMs: 20000, verificationStrategy: 'NONE'
+      },
+      {
+        name: 'browser.extract',
+        version: '1.0.0',
+        description: 'Extract elements or text from the page based on a selector.',
+        category: 'BROWSER',
+        inputSchema: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] },
+        requiredPermissions: ['BROWSER'], riskLevel: 'LOW', allowedAgents: ['*'], timeoutMs: 10000, verificationStrategy: 'NONE'
+      },
+      {
+        name: 'browser.download',
+        version: '1.0.0',
+        description: 'Trigger and wait for a download on the current page.',
+        category: 'BROWSER',
+        inputSchema: { type: 'object', properties: { urlOrSelector: { type: 'string' } }, required: ['urlOrSelector'] },
+        requiredPermissions: ['BROWSER'], riskLevel: 'LOW', allowedAgents: ['*'], timeoutMs: 30000, verificationStrategy: 'NONE'
+      },
+      {
+        name: 'browser.screenshot',
+        version: '1.0.0',
+        description: 'Take a screenshot of the active browser page.',
+        category: 'BROWSER',
+        inputSchema: { type: 'object', properties: {} },
+        requiredPermissions: ['BROWSER'], riskLevel: 'LOW', allowedAgents: ['*'], timeoutMs: 10000, verificationStrategy: 'NONE'
       },
       {
         name: 'notes.search',
@@ -1142,4 +1222,5 @@ export class ToolRegistry {
     }
   }
 }
+
 

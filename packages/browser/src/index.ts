@@ -1,7 +1,12 @@
-import path from 'path';
+﻿import path from 'path';
 import os from 'os';
 import fs from 'fs';
 import { PromptInjectionDefense, SecretRedactor } from '@meghai/security';
+import { chromium, Browser, BrowserContext, Page } from 'playwright-core';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 export interface BrowserPageContent {
   url: string;
@@ -23,102 +28,78 @@ export class SafeBrowserEngine {
   private baseSessionDir: string;
   private options: BrowserOptions;
 
+  private browser: Browser | null = null;
+  private context: BrowserContext | null = null;
+  private activePage: Page | null = null;
+
   constructor(options: BrowserOptions = {}) {
     this.options = {
       allowLocalhost: false,
       userAgent: 'MeghAI-SecureBrowser/1.0 (+https://meghai.local)',
       timeoutMs: 15000,
-      ...options,
+      ...options
     };
-    this.baseSessionDir = path.join(
-      process.env.LOCALAPPDATA || os.homedir(),
-      'MeghAI',
-      'browser_sessions'
-    );
-    if (!fs.existsSync(this.baseSessionDir)) {
-      fs.mkdirSync(this.baseSessionDir, { recursive: true });
-    }
+    this.baseSessionDir = path.join(os.tmpdir(), 'meghai-browser-sessions');
   }
 
-  /**
-   * Validate that URL is safe against SSRF attacks (blocks private IP ranges and cloud metadata)
-   */
-  public validateUrl(rawUrl: string): { isValid: boolean; reason?: string; normalizedUrl?: string } {
+  private async isChromeRunning(): Promise<boolean> {
     try {
-      const parsed = new URL(rawUrl);
-      if (!['http:', 'https:'].includes(parsed.protocol)) {
-        return { isValid: false, reason: `Disallowed protocol: ${parsed.protocol}. Only http and https allowed.` };
-      }
-
-      const hostname = parsed.hostname.toLowerCase();
-
-      if (!this.options.allowLocalhost) {
-        if (
-          hostname === 'localhost' ||
-          hostname === '127.0.0.1' ||
-          hostname === '::1' ||
-          hostname === '169.254.169.254' ||
-          hostname.startsWith('192.168.') ||
-          hostname.startsWith('10.') ||
-          (hostname.startsWith('172.') && parseInt(hostname.split('.')[1], 10) >= 16 && parseInt(hostname.split('.')[1], 10) <= 31)
-        ) {
-          return { isValid: false, reason: `Access to private/local network address '${hostname}' is prohibited.` };
-        }
-      }
-
-      return { isValid: true, normalizedUrl: parsed.toString() };
+      const { stdout } = await execAsync('tasklist /FI "IMAGENAME eq chrome.exe" /FO CSV');
+      return stdout.toLowerCase().includes('chrome.exe');
     } catch {
-      return { isValid: false, reason: `Malformed URL: ${rawUrl}` };
+      return false;
     }
   }
 
-  /**
-   * Fetch and safely extract text and links from a web page
-   */
-  public async fetchAndExtract(url: string): Promise<BrowserPageContent> {
-    const validation = this.validateUrl(url);
-    if (!validation.isValid || !validation.normalizedUrl) {
-      throw new Error(`Browser Security Error: ${validation.reason}`);
+  private async ensureConnection(): Promise<Page> {
+    if (this.activePage && !this.activePage.isClosed()) {
+      return this.activePage;
     }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
 
     try {
-      const response = await fetch(validation.normalizedUrl, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': this.options.userAgent || 'MeghAI-SecureBrowser/1.0',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP fetch failed with status ${response.status}: ${response.statusText}`);
+      this.browser = await chromium.connectOverCDP('http://localhost:9222');
+      this.context = this.browser.contexts()[0];
+      this.activePage = this.context.pages()[0] || await this.context.newPage();
+      return this.activePage;
+    } catch (cdpError: any) {
+      const running = await this.isChromeRunning();
+      if (running) {
+        throw new Error('Browser Automation Error: Chrome is already running but not listening on debugging port 9222. Please close Chrome and let MeghAI launch it, or manually start it with --remote-debugging-port=9222.');
       }
 
-      const html = await response.text();
-      return this.parseAndSanitizeHtml(validation.normalizedUrl, html);
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        throw new Error(`Browser request timed out after ${this.options.timeoutMs}ms: ${url}`);
+      try {
+        this.browser = await chromium.launch({
+          channel: 'chrome',
+          headless: false,
+          args: ['--remote-debugging-port=9222']
+        });
+        this.context = await this.browser.newContext();
+        this.activePage = await this.context.newPage();
+        return this.activePage;
+      } catch (launchError: any) {
+        throw new Error('Browser Automation Error: Could not launch Chrome or connect via Playwright. ' + launchError.message);
       }
-      throw err;
-    } finally {
-      clearTimeout(timeout);
     }
   }
 
-  /**
-   * Extract readable content and links from HTML, stripping scripts, styles, and dangerous tags
-   */
+      public validateUrl(url: string): { isValid: boolean; normalizedUrl?: string; error?: string } {
+    try {
+      let parsedUrl = url.trim();
+      if (!parsedUrl.startsWith('http')) parsedUrl = 'https://' + parsedUrl;
+      const parsed = new URL(parsedUrl);
+      if (!this.options.allowLocalhost && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')) {
+        return { isValid: false, error: 'Localhost not allowed' };
+      }
+      return { isValid: parsed.protocol === 'http:' || parsed.protocol === 'https:', normalizedUrl: parsed.href };
+    } catch {
+      return { isValid: false, error: 'Invalid URL' };
+    }
+  }
+
   public parseAndSanitizeHtml(url: string, html: string): BrowserPageContent {
-    // 1. Extract title
     const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
     const title = titleMatch ? titleMatch[1].trim() : 'Untitled Page';
 
-    // 2. Strip scripts, styles, noscript, svg, and iframes
     let cleaned = html
       .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, ' ')
       .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, ' ')
@@ -126,7 +107,6 @@ export class SafeBrowserEngine {
       .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, ' ')
       .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, ' ');
 
-    // 3. Extract links before stripping remaining tags
     const links: Array<{ text: string; href: string }> = [];
     const linkRegex = /<a\s+(?:[^>]*?\s+)?href=(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi;
     let match;
@@ -137,167 +117,174 @@ export class SafeBrowserEngine {
         try {
           const absoluteHref = new URL(href, url).toString();
           links.push({ text: linkText, href: absoluteHref });
-        } catch {
-          // Ignore invalid link targets
-        }
+        } catch { }
       }
     }
 
-    // 4. Strip all remaining HTML tags
     let rawText = cleaned.replace(/<[^>]+>/g, ' ');
-    // Decode common HTML entities
-    rawText = rawText
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/\s+/g, ' ')
-      .trim();
+    rawText = rawText.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
 
-    // 5. Wrap in Untrusted External Content fence to defend against prompt injection
-    const wrapped = PromptInjectionDefense.wrapUntrustedContent(
-      rawText.slice(0, 15000), // Protect context window limit
-      `Web URL: ${SecretRedactor.redact(url)}`,
-      'EXTERNAL_WEB'
-    );
+    const wrapped = PromptInjectionDefense.wrapUntrustedContent(rawText.slice(0, 15000), `Web URL: ${SecretRedactor.redact(url)}`, 'EXTERNAL_WEB');
 
     return {
-      url,
-      title,
-      rawText: rawText.slice(0, 15000),
-      sanitizedText: wrapped.content,
-      links: links.slice(0, 50),
-      isUntrusted: true,
-      extractedAt: new Date().toISOString(),
+      url, title, rawText: rawText.slice(0, 15000), sanitizedText: wrapped.content, links: links.slice(0, 50), isUntrusted: true, extractedAt: new Date().toISOString()
     };
   }
 
-  /**
-   * Create an isolated profile directory for this browsing session
-   */
-  public createIsolatedProfile(sessionId: string): string {
-    const profilePath = path.join(this.baseSessionDir, sessionId);
-    if (!fs.existsSync(profilePath)) {
-      fs.mkdirSync(profilePath, { recursive: true });
-    }
-    return profilePath;
+  public async getActiveTab(): Promise<{ id: string; url: string; title: string }> {
+    const page = await this.ensureConnection();
+    return { id: 'active', url: page.url(), title: await page.title() };
   }
 
-  // Stateful Session Management for Multi-Step Browser Automation
-  private tabs: Map<string, { id: string; url: string; title: string; history: string[]; historyIndex: number }> = new Map();
-  private activeTabId: string = 'tab-1';
-
-  public getActiveTab(): { id: string; url: string; title: string } {
-    if (!this.tabs.has(this.activeTabId)) {
-      this.tabs.set(this.activeTabId, {
-        id: this.activeTabId,
-        url: 'about:blank',
-        title: 'New Tab',
-        history: ['about:blank'],
-        historyIndex: 0
+  public async listTabs(): Promise<Array<{ id: string; url: string; title: string; isActive: boolean }>> {
+    const page = await this.ensureConnection();
+    const context = page.context();
+    const pages = context.pages();
+    const result = [];
+    for (let i = 0; i < pages.length; i++) {
+      result.push({
+        id: `page-${i}`,
+        url: pages[i].url(),
+        title: await pages[i].title().catch(() => 'Unknown'),
+        isActive: pages[i] === page
       });
     }
-    const tab = this.tabs.get(this.activeTabId)!;
-    return { id: tab.id, url: tab.url, title: tab.title };
+    return result;
   }
 
-  public listTabs(): Array<{ id: string; url: string; title: string; isActive: boolean }> {
-    const res: Array<{ id: string; url: string; title: string; isActive: boolean }> = [];
-    for (const [id, t] of this.tabs.entries()) {
-      res.push({
-        id,
-        url: t.url,
-        title: t.title,
-        isActive: id === this.activeTabId
-      });
+  public async switchTab(tabId: string): Promise<{ success: boolean; activeTabId: string }> {
+    const page = await this.ensureConnection();
+    const context = page.context();
+    const pages = context.pages();
+    const index = parseInt(tabId.replace('page-', ''), 10);
+    if (!isNaN(index) && index >= 0 && index < pages.length) {
+      this.activePage = pages[index];
+      await this.activePage.bringToFront();
+      return { success: true, activeTabId: tabId };
     }
-    if (res.length === 0) {
-      this.getActiveTab();
-      return [{ id: this.activeTabId, url: 'about:blank', title: 'New Tab', isActive: true }];
-    }
-    return res;
+    return { success: false, activeTabId: 'page-unknown' };
   }
 
-  public switchTab(tabId: string): { success: boolean; activeTabId: string } {
-    if (this.tabs.has(tabId)) {
-      this.activeTabId = tabId;
-      return { success: true, activeTabId: this.activeTabId };
+  public async closeTab(tabId: string): Promise<{ success: boolean; remainingTabs: number }> {
+    const page = await this.ensureConnection();
+    const context = page.context();
+    const pages = context.pages();
+    const index = parseInt(tabId.replace('page-', ''), 10);
+    if (!isNaN(index) && index >= 0 && index < pages.length) {
+      await pages[index].close();
+      if (this.activePage === pages[index]) {
+        this.activePage = context.pages()[0] || null;
+      }
+      return { success: true, remainingTabs: context.pages().length };
     }
-    return { success: false, activeTabId: this.activeTabId };
+    return { success: false, remainingTabs: pages.length };
   }
 
-  public closeTab(tabId: string): { success: boolean; remainingTabs: number } {
-    this.tabs.delete(tabId);
-    if (this.activeTabId === tabId) {
-      const first = this.tabs.keys().next().value;
-      this.activeTabId = first || 'tab-1';
-    }
-    return { success: true, remainingTabs: this.tabs.size };
-  }
-
-  /**
-   * Navigate active tab to a URL
-   */
   public async navigate(url: string): Promise<BrowserPageContent> {
-    const content = await this.fetchAndExtract(url);
-    const tab = this.tabs.get(this.activeTabId) || {
-      id: this.activeTabId,
-      url: 'about:blank',
-      title: 'New Tab',
-      history: [],
-      historyIndex: -1
-    };
-
-    tab.url = content.url;
-    tab.title = content.title;
-    tab.history = tab.history.slice(0, tab.historyIndex + 1);
-    tab.history.push(content.url);
-    tab.historyIndex = tab.history.length - 1;
-    this.tabs.set(this.activeTabId, tab);
-
-    return content;
+    const page = await this.ensureConnection();
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: this.options.timeoutMs });
+    await page.waitForTimeout(1000);
+    const html = await page.content();
+    return this.parseAndSanitizeHtml(page.url(), html);
+  }
+  
+  public async readPage(): Promise<BrowserPageContent> {
+    const page = await this.ensureConnection();
+    const html = await page.content();
+    return this.parseAndSanitizeHtml(page.url(), html);
   }
 
-  /**
-   * Search the web using Google Search / DuckDuckGo
-   */
+  public async searchInPage(query: string): Promise<BrowserPageContent> {
+    const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+    return await this.navigate(url);
+  }
+
   public async search(query: string): Promise<{ query: string; results: Array<{ title: string; url: string; snippet: string }>; content: BrowserPageContent }> {
-    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    let content: BrowserPageContent;
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     try {
-      content = await this.navigate(searchUrl);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs);
+      const response = await fetch(url, { signal: controller.signal, headers: { 'User-Agent': this.options.userAgent || '' }});
+      clearTimeout(timeout);
+      const html = await response.text();
+      const content = this.parseAndSanitizeHtml(url, html);
+      const results = content.links.slice(0, 10).map(l => ({ title: l.text, url: l.href, snippet: '' }));
+      return { query, results, content };
     } catch {
-      // Fallback to simulated safe search representation if offline or rate limited
-      content = {
-        url: `https://www.google.com/search?q=${encodeURIComponent(query)}`,
-        title: `${query} - Google Search`,
-        rawText: `Search results for "${query}". High-quality learning roadmaps and tutorials available.`,
-        sanitizedText: `[BEGIN UNTRUSTED DATA FROM: Web Search]\nSearch results for "${query}"\n[END UNTRUSTED DATA]`,
-        links: [
-          { text: `${query} Complete Guide`, href: `https://example.org/guide?q=${encodeURIComponent(query)}` },
-          { text: `${query} Best Practices`, href: `https://example.org/best-practices` }
-        ],
-        isUntrusted: true,
-        extractedAt: new Date().toISOString()
-      };
+      return { query, results: [], content: this.parseAndSanitizeHtml(url, '') };
     }
+  }
 
-    const results: Array<{ title: string; url: string; snippet: string }> = [];
-    for (const link of content.links.slice(0, 10)) {
-      results.push({
-        title: link.text,
-        url: link.href,
-        snippet: `Web result matching query: ${query}`
-      });
+  public async click(selector: string): Promise<BrowserPageContent> {
+    const page = await this.ensureConnection();
+    await page.click(selector, { timeout: 5000 });
+    await page.waitForTimeout(1000);
+    const html = await page.content();
+    return this.parseAndSanitizeHtml(page.url(), html);
+  }
+  
+  public async clickFirstOrganicResult(): Promise<BrowserPageContent> {
+    const page = await this.ensureConnection();
+    const searchResultSelector = '#search a h3, .g a h3';
+    await page.waitForSelector(searchResultSelector, { timeout: 5000 }).catch(() => {});
+    const elements = await page.$$(searchResultSelector);
+    if (elements.length > 0) {
+      await elements[0].click();
+      await page.waitForLoadState('domcontentloaded');
+      await page.waitForTimeout(1000);
+    } else {
+      throw new Error('No organic search results found on the current page.');
     }
+    const html = await page.content();
+    return this.parseAndSanitizeHtml(page.url(), html);
+  }
 
-    return {
-      query,
-      results,
-      content
-    };
+  public async type(selector: string, text: string): Promise<void> {
+    const page = await this.ensureConnection();
+    await page.fill(selector, text, { timeout: 5000 });
+  }
+
+  public async scroll(direction: 'up' | 'down'): Promise<void> {
+    const page = await this.ensureConnection();
+    await page.evaluate((dir) => {
+      window.scrollBy(0, dir === 'down' ? window.innerHeight : -window.innerHeight);
+    }, direction);
+  }
+
+  public async wait(ms: number): Promise<void> {
+    const page = await this.ensureConnection();
+    await page.waitForTimeout(ms);
+  }
+
+  public async extract(selector: string): Promise<string[]> {
+    const page = await this.ensureConnection();
+    const elements = await page.$$(selector);
+    const results = [];
+    for (const el of elements) {
+      const text = await el.textContent();
+      if (text) results.push(text.trim());
+    }
+    return results;
+  }
+
+  public async download(urlOrSelector: string): Promise<string> {
+    const page = await this.ensureConnection();
+    const [ download ] = await Promise.all([
+      page.waitForEvent('download', { timeout: 30000 }),
+      urlOrSelector.startsWith('http') ? page.goto(urlOrSelector) : page.click(urlOrSelector)
+    ]);
+    const path = await download.path();
+    return path || 'Download failed or path unknown';
+  }
+
+  public async screenshot(): Promise<string> {
+    const page = await this.ensureConnection();
+    const screenshotBuffer = await page.screenshot({ type: 'png' });
+    const screenshotPath = path.join(this.baseSessionDir, 'screenshot_' + Date.now() + '.png');
+    if (!fs.existsSync(this.baseSessionDir)) fs.mkdirSync(this.baseSessionDir, { recursive: true });
+    fs.writeFileSync(screenshotPath, screenshotBuffer);
+    return screenshotPath;
   }
 }
+
 

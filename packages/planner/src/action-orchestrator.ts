@@ -277,7 +277,7 @@ export class ActionOrchestrator {
     }
 
     // 2. Check Idempotency Key
-    const idempotencyKey = options.idempotencyKey || `idemp:${rawInput.trim().toLowerCase()}`;
+    const idempotencyKey = options.idempotencyKey || (options.commandId ? `cmd:${options.commandId}` : options.requestId ? `req:${options.requestId}` : `idemp:${rawInput.trim().toLowerCase()}`);
     if (this.idempotencyStore.has(idempotencyKey) && !options.userConfirmed) {
       const cached = this.idempotencyStore.get(idempotencyKey)!;
       // If completed recently within 10 seconds, return cached to avoid duplicate actions
@@ -542,7 +542,7 @@ export class ActionOrchestrator {
 
       try {
         const execResult = await this.toolRuntime.execute({
-          id: `call-${step.stepId}`,
+          id: `call-${plan.planId}-${step.stepId}`,
           toolName: step.toolId,
           arguments: resolvedArgs,
           userConfirmed: options.userConfirmed
@@ -1353,7 +1353,20 @@ export class ActionOrchestrator {
     switch (plan.userIntent) {
       case 'OPEN_APP': {
         const app = (plan.steps[0]?.arguments['appName'] as string) || 'Application';
-        return `${app.charAt(0).toUpperCase() + app.slice(1)} opened successfully.`;
+        const res = plan.steps[0]?.result as any;
+        if (res?.alreadyRunning) {
+          if (app.toLowerCase() === 'chrome') return 'Chrome is already running.';
+          return `Application '${app}' is already running (application '${app}' focused).`;
+        }
+        return `Successfully launched application '${app}'.`;
+      }
+      case 'OPEN_AND_SEARCH': {
+        const query = (plan.steps[1]?.arguments['query'] as string) || (plan.steps[0]?.arguments['query'] as string) || 'search';
+        const searchRes = (plan.steps[1]?.result || plan.steps[0]?.result) as any;
+        const count = searchRes?.results?.length || 0;
+        const openRes = plan.steps[0]?.result as any;
+        const appPrefix = openRes?.alreadyRunning ? 'Chrome is already running.' : "Successfully launched application 'chrome'.";
+        return `${appPrefix} Searched web for "${query}" (${count} results retrieved).`;
       }
       case 'WEB_SEARCH': {
         const query = (plan.steps[0]?.arguments['query'] as string) || 'web';
@@ -1382,9 +1395,10 @@ export class ActionOrchestrator {
         return `Created task "${title}".`;
       }
       case 'LIST_TASKS': {
-        const tasks = (plan.steps[0]?.result as any[]) || [];
+        const res = plan.steps[0]?.result as any;
+        const tasks = Array.isArray(res) ? res : Array.isArray(res?.tasks) ? res.tasks : [];
         if (tasks.length === 0) return 'You have no pending tasks in your list.';
-        const list = tasks.map((t, idx) => `${idx + 1}. [${t.priority}] ${t.title} (${t.status})`).join('\n');
+        const list = tasks.map((t: any, idx: number) => `${idx + 1}. [${t.priority || 'MEDIUM'}] ${t.title} (${t.status || 'PENDING'})`).join('\n');
         return `Here are your tasks:\n${list}`;
       }
       case 'DELETE_FILE': {

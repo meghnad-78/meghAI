@@ -9,7 +9,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@meghai/security": "*",
     "@meghai/shared-types": "*",
-    "@meghai/security": "*"
+    "playwright-core": "^1.63.0"
   }
 }

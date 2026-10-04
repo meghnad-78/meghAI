@@ -138,7 +138,7 @@ export class WindowsSystem {
         return { command: 'notepad.exe', args: [] };
       case 'chrome':
       case 'google chrome':
-        return { command: 'chrome.exe', args: [] };
+        return { command: 'chrome.exe', args: ['--remote-debugging-port=9222'] };
       case 'edge':
       case 'microsoft edge':
         return { command: 'msedge.exe', args: [] };
@@ -161,13 +161,85 @@ export class WindowsSystem {
   }
 
   /**
-   * Launch application safely with alias resolution and process registration
+   * Check if an application is already running on the system
    */
-  public static async launchApp(appName: string, args: string[] = []): Promise<{ pid: number; appName: string }> {
+  public static async isAppRunning(appName: string): Promise<{ isRunning: boolean; pid?: number; processName: string }> {
+    const resolved = this.resolveAppCommand(appName);
+    const procName = resolved.command.replace(/\.exe$/i, '').replace(/\.cmd$/i, '');
+    const cleanProcName = (procName === 'calc') ? 'CalculatorApp' : procName;
+
+    const psScript = `
+      $procs = Get-Process -Name "${cleanProcName}","${procName}" -ErrorAction SilentlyContinue
+      if ($procs) {
+        $p = if ($procs -is [array]) { $procs[0].Id } else { $procs.Id }
+        @{ Running = $true; Pid = $p; ProcessName = "${cleanProcName}" } | ConvertTo-Json
+      } else {
+        @{ Running = $false; ProcessName = "${cleanProcName}" } | ConvertTo-Json
+      }
+    `;
+    try {
+      const output = await this.executePowerShell(psScript, 4000);
+      if (!output) return { isRunning: false, processName: cleanProcName };
+      const data = JSON.parse(output);
+      return {
+        isRunning: Boolean(data.Running),
+        pid: data.Pid,
+        processName: data.ProcessName || cleanProcName
+      };
+    } catch {
+      return { isRunning: false, processName: cleanProcName };
+    }
+  }
+
+  /**
+   * Attempt to focus an existing application window
+   */
+  public static async focusApp(appName: string): Promise<{ focused: boolean; details: string }> {
+    const resolved = this.resolveAppCommand(appName);
+    const procName = resolved.command.replace(/\.exe$/i, '').replace(/\.cmd$/i, '');
+    const cleanProcName = (procName === 'calc') ? 'CalculatorApp' : procName;
+    const psScript = `
+      $wshell = New-Object -ComObject WScript.Shell
+      $proc = Get-Process -Name "${cleanProcName}","${procName}" -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($proc) {
+        $res = $wshell.AppActivate($proc.Id)
+        @{ Focused = $res; Pid = $proc.Id } | ConvertTo-Json
+      } else {
+        @{ Focused = $false } | ConvertTo-Json
+      }
+    `;
+    try {
+      const output = await this.executePowerShell(psScript, 4000);
+      if (!output) return { focused: false, details: 'No output' };
+      const data = JSON.parse(output);
+      return { focused: Boolean(data.Focused), details: `Focused process PID ${data.Pid}` };
+    } catch {
+      return { focused: false, details: 'Could not focus window' };
+    }
+  }
+
+  /**
+   * Launch application safely with alias resolution and process registration.
+   * Truthfully detects and distinguishes if the application is already running vs newly spawned.
+   */
+  public static async launchApp(appName: string, args: string[] = []): Promise<{ pid: number; appName: string; alreadyRunning: boolean; action: 'LAUNCHED' | 'ALREADY_RUNNING' }> {
     if (KillSwitch.isActive()) {
       throw new Error('Kill switch is active; launching apps is blocked.');
     }
 
+    // Step 1: Detect if already running before blindly spawning
+    const runningCheck = await this.isAppRunning(appName);
+    if (runningCheck.isRunning && runningCheck.pid) {
+      await this.focusApp(appName);
+      return {
+        pid: runningCheck.pid,
+        appName,
+        alreadyRunning: true,
+        action: 'ALREADY_RUNNING'
+      };
+    }
+
+    // Step 2: Spawn new instance if not running
     const resolved = this.resolveAppCommand(appName);
     const finalCommand = resolved.command;
     const finalArgs = resolved.args.length > 0 ? resolved.args : args;
@@ -192,10 +264,10 @@ export class WindowsSystem {
             }
           });
           child.unref();
-          resolve({ pid: child.pid, appName });
+          resolve({ pid: child.pid, appName, alreadyRunning: false, action: 'LAUNCHED' });
         } else {
           // If child spawned without explicit pid, return non-zero dummy
-          resolve({ pid: 1, appName });
+          resolve({ pid: 1, appName, alreadyRunning: false, action: 'LAUNCHED' });
         }
       } catch (err) {
         reject(new Error(`Error launching app '${appName}': ${(err as Error).message}`));

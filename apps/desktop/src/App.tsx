@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import type { AIState, MeghAIEvent, MicrophoneState, VoiceInputState, OnlineSystemStatus } from '@meghai/shared-types';
-import { AICore } from './components/AICore.js';
 import { AmbientBackground } from './components/AmbientBackground.js';
-import { TopBar } from './components/TopBar.js';
-import { ChatView, type ChatMessage } from './components/ChatView.js';
+import { NavRail } from './components/NavRail.js';
+import { TopHUD } from './components/TopHUD.js';
+import { AICore } from './components/AICore.js';
+import { ConversationLayer, type ChatMessage } from './components/ConversationLayer.js';
 import { Composer } from './components/Composer.js';
+import { ActionTrail } from './components/ActionTrail.js';
 import { ActionTimelineDrawer } from './components/ActionTimelineDrawer.js';
 import { ModelSelectorModal } from './components/ModelSelectorModal.js';
 import { VoiceSelectorModal } from './components/VoiceSelectorModal.js';
@@ -18,7 +20,6 @@ import { VoiceStudio } from './components/VoiceStudio.js';
 import { RoutineCenter } from './components/RoutineCenter.js';
 import { ProviderCenter } from './components/ProviderCenter.js';
 import { PermissionCenter } from './components/PermissionCenter.js';
-import { tokens } from './theme/tokens.js';
 import { soundEngine } from './sound/soundEngine.js';
 
 export type ActiveTab =
@@ -33,6 +34,7 @@ export type ActiveTab =
   | 'permissions';
 
 export const App: React.FC = () => {
+  // ── Core AI State ──────────────────────────────────────────────────────────
   const [aiState, setAiState] = useState<AIState>('READY');
   const [micState, setMicState] = useState<MicrophoneState>('MIC_OFF');
   const [voiceInputState, setVoiceInputState] = useState<VoiceInputState>('IDLE');
@@ -53,65 +55,42 @@ export const App: React.FC = () => {
   ]);
   const [inputText, setInputText] = useState('');
   const [liveTranscript, setLiveTranscript] = useState<string | null>(null);
+  const seenEventIds = useRef(new Set<string>());
 
-  // Modals & Panels State
+  // ── UI State ───────────────────────────────────────────────────────────────
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
   const [isVoiceSelectorOpen, setIsVoiceSelectorOpen] = useState(false);
   const [isPersonalitySelectorOpen, setIsPersonalitySelectorOpen] = useState(false);
   const [isTimelineOpen, setIsTimelineOpen] = useState(false);
+  const [isTrailOpen, setIsTrailOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
 
-  // Selected Personality
+  // ── Personality / Providers ────────────────────────────────────────────────
   const [selectedPersonalityId, setSelectedPersonalityId] = useState<string>(() => {
-    try {
-      return localStorage.getItem('meghai_selected_personality_id') || 'futuristic';
-    } catch {
-      return 'futuristic';
-    }
+    try { return localStorage.getItem('meghai_selected_personality_id') || 'futuristic'; } catch { return 'futuristic'; }
   });
   const [selectedPersonalityName, setSelectedPersonalityName] = useState<string>(() => {
-    try {
-      return localStorage.getItem('meghai_selected_personality_name') || 'Futuristic';
-    } catch {
-      return 'Futuristic';
-    }
+    try { return localStorage.getItem('meghai_selected_personality_name') || 'Futuristic'; } catch { return 'Futuristic'; }
   });
   const [personalityStyle, setPersonalityStyle] = useState<string>('orbital');
 
-  // Selected Providers & Voices (Loaded from persistent store + localStorage cache)
   const [selectedModel, setSelectedModel] = useState<string>(() => {
-    try {
-      return localStorage.getItem('meghai_selected_provider') || 'local-ollama';
-    } catch {
-      return 'local-ollama';
-    }
+    try { return localStorage.getItem('meghai_selected_provider') || 'local-ollama'; } catch { return 'local-ollama'; }
   });
   const [selectedModelId, setSelectedModelId] = useState<string | undefined>(() => {
-    try {
-      return localStorage.getItem('meghai_selected_model_id') || 'llama3.2:latest';
-    } catch {
-      return 'llama3.2:latest';
-    }
+    try { return localStorage.getItem('meghai_selected_model_id') || 'llama3.2:latest'; } catch { return 'llama3.2:latest'; }
   });
   const [selectedVoiceId, setSelectedVoiceId] = useState<string>(() => {
-    try {
-      return localStorage.getItem('meghai_selected_voice_id') || 'onecore-heera';
-    } catch {
-      return 'onecore-heera';
-    }
+    try { return localStorage.getItem('meghai_selected_voice_id') || 'onecore-heera'; } catch { return 'onecore-heera'; }
   });
   const [selectedVoiceName, setSelectedVoiceName] = useState<string>(() => {
-    try {
-      return localStorage.getItem('meghai_selected_voice_name') || 'Heera';
-    } catch {
-      return 'Heera';
-    }
+    try { return localStorage.getItem('meghai_selected_voice_name') || 'Heera'; } catch { return 'Heera'; }
   });
 
   const hasPlayedStartupRef = useRef(false);
 
-  // Global Keyboard Shortcuts (Ctrl+Space for Palette) & First User Gesture for Sonic Engine
+  // ── Keyboard Shortcuts & First Gesture ────────────────────────────────────
   useEffect(() => {
     const handleFirstGesture = () => {
       if (!hasPlayedStartupRef.current) {
@@ -135,7 +114,7 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // Connect to SSE Stream from MeghAI API Server
+  // ── SSE Event Stream ───────────────────────────────────────────────────────
   useEffect(() => {
     const eventSource = new EventSource('/api/v1/events/stream');
 
@@ -150,9 +129,17 @@ export const App: React.FC = () => {
         }
         if ('id' in evt) {
           const mEvt = evt as MeghAIEvent;
+          if (mEvt.id) {
+            if (seenEventIds.current.has(mEvt.id)) return;
+            seenEventIds.current.add(mEvt.id);
+            if (seenEventIds.current.size > 2000) {
+              const first = seenEventIds.current.values().next().value;
+              if (first) seenEventIds.current.delete(first);
+            }
+          }
           setEvents(prev => [mEvt, ...prev.slice(0, 99)]);
 
-          // Sound triggers and native microphone / voice events
+          // ── Sound & State Routing ────────────────────────────────────────
           if (mEvt.type === 'WAKE_DETECTED' || mEvt.type === 'WAKE_ACTIVATION_STARTED') {
             soundEngine.playWake();
           } else if (mEvt.type === 'MIC_STARTING') {
@@ -164,7 +151,12 @@ export const App: React.FC = () => {
             soundEngine.startThinkingTexture();
           } else if (mEvt.type === 'MODEL_COMPLETED') {
             soundEngine.stopThinkingTexture();
-          } else if (mEvt.type === 'KILLSWITCH_ACTIVATED' || mEvt.type === 'KILL_SWITCH_ACTIVATED' || mEvt.type === 'INTERRUPTED' || mEvt.type === 'TTS_INTERRUPTED') {
+          } else if (
+            mEvt.type === 'KILLSWITCH_ACTIVATED' ||
+            mEvt.type === 'KILL_SWITCH_ACTIVATED' ||
+            mEvt.type === 'INTERRUPTED' ||
+            mEvt.type === 'TTS_INTERRUPTED'
+          ) {
             soundEngine.playInterruption();
             setAiState('STOPPED');
             setSpeakingMsgId(null);
@@ -194,16 +186,11 @@ export const App: React.FC = () => {
             const payload = mEvt.payload as { state: VoiceInputState };
             if (payload?.state) {
               setVoiceInputState(payload.state);
-              if (payload.state === 'IDLE') {
-                setLiveTranscript(null);
-              }
+              if (payload.state === 'IDLE') setLiveTranscript(null);
             }
           } else if (mEvt.type === 'TRANSCRIPT_PARTIAL') {
-            // Streaming / interim transcript preview: isolated to preview chip
             const payload = mEvt.payload as { text?: string };
-            if (payload?.text) {
-              setLiveTranscript(payload.text);
-            }
+            if (payload?.text) setLiveTranscript(payload.text);
           } else if (mEvt.type === 'TRANSCRIPT_FINAL') {
             setLiveTranscript(null);
             const payload = mEvt.payload as {
@@ -215,24 +202,19 @@ export const App: React.FC = () => {
             };
             const displayText = payload?.interpretedText || payload?.text || payload?.rawText;
             if (displayText) {
-              const rawSuffix = payload?.rawText && payload?.interpretedText && payload.rawText !== payload.interpretedText
-                ? ` (raw: "${payload.rawText}")`
-                : '';
+              const rawSuffix =
+                payload?.rawText &&
+                payload?.interpretedText &&
+                payload.rawText !== payload.interpretedText
+                  ? ` (raw: "${payload.rawText}")`
+                  : '';
               const userBubbleText = `🎙️ ${displayText}${rawSuffix}`;
               const msgId = payload?.commandId ? `usr-voice-${payload.commandId}` : `usr-voice-${Date.now()}`;
               setMessages(prev => {
-                // Idempotency: Prevent duplicate message bubbles for the same voice command
-                if (prev.some(m => m.id === msgId || (m.sender === 'user' && m.text === userBubbleText))) {
-                  return prev;
-                }
+                if (prev.some(m => m.id === msgId || (m.sender === 'user' && m.text === userBubbleText))) return prev;
                 return [
                   ...prev,
-                  {
-                    id: msgId,
-                    sender: 'user',
-                    text: userBubbleText,
-                    timestamp: new Date().toLocaleTimeString()
-                  }
+                  { id: msgId, sender: 'user', text: userBubbleText, timestamp: new Date().toLocaleTimeString() }
                 ];
               });
             }
@@ -244,13 +226,29 @@ export const App: React.FC = () => {
               verificationStatus?: any;
               verificationDetails?: string;
               commandId?: string;
+              timelineCorrelationId?: string;
               provider?: string;
               modelId?: string;
             };
+            const corrId = payload?.commandId || payload?.timelineCorrelationId || mEvt.correlationId;
             if (payload?.reply) {
-              const respId = payload?.commandId ? `megh-resp-${payload.commandId}` : `megh-resp-${Date.now()}`;
+              const respId = corrId ? `megh-resp-${corrId}` : `megh-resp-${Date.now()}`;
               setMessages(prev => {
-                if (prev.some(m => m.id === respId || m.text === payload.reply)) return prev;
+                const existingIdx = prev.findIndex(m =>
+                  (corrId && (m.id === `megh-resp-${corrId}` || m.id.includes(corrId))) || m.id === respId
+                );
+                if (existingIdx >= 0) {
+                  const next = [...prev];
+                  next[existingIdx] = {
+                    ...next[existingIdx],
+                    text: payload.reply!,
+                    verificationStatus: payload.verificationStatus,
+                    verificationDetails: payload.verificationDetails,
+                    provider: payload.provider || next[existingIdx].provider,
+                    modelId: payload.modelId || next[existingIdx].modelId
+                  };
+                  return next;
+                }
                 return [
                   ...prev,
                   {
@@ -269,24 +267,14 @@ export const App: React.FC = () => {
           } else if (mEvt.type === 'TASK_FAILED' || mEvt.type === 'VOICE_MODEL_RATE_LIMITED') {
             setLiveTranscript(null);
             soundEngine.playError();
-            const payload = mEvt.payload as {
-              reply?: string;
-              error?: string;
-              commandId?: string;
-            };
-            const errorReply = payload?.reply || (payload?.error ? `⚠️ ${payload.error}` : 'Unable to complete request.');
+            const payload = mEvt.payload as { reply?: string; error?: string; commandId?: string };
+            const errorReply = payload?.reply || (payload?.error ? `Error: ${payload.error}` : 'Unable to complete request.');
             const errId = payload?.commandId ? `megh-err-${payload.commandId}` : `megh-err-${Date.now()}`;
             setMessages(prev => {
               if (prev.some(m => m.id === errId || m.text === errorReply)) return prev;
               return [
                 ...prev,
-                {
-                  id: errId,
-                  sender: 'megh',
-                  text: errorReply,
-                  verificationStatus: 'FAILED',
-                  timestamp: new Date().toLocaleTimeString()
-                }
+                { id: errId, sender: 'megh', text: errorReply, verificationStatus: 'FAILED', timestamp: new Date().toLocaleTimeString() }
               ];
             });
           } else if (mEvt.type === 'VOICE_NO_SPEECH_DETECTED') {
@@ -294,7 +282,7 @@ export const App: React.FC = () => {
             setAiState('READY');
           } else if (mEvt.type === 'TTS_FALLBACK') {
             const payload = mEvt.payload as { originalVoiceId?: string; fallbackVoiceId?: string; reason?: string };
-            console.warn(`[MeghAI TTS Fallback] Original: ${payload?.originalVoiceId} -> Fallback: ${payload?.fallbackVoiceId}. Reason: ${payload?.reason}`);
+            console.warn(`[MeghAI TTS Fallback] ${payload?.originalVoiceId} -> ${payload?.fallbackVoiceId}. Reason: ${payload?.reason}`);
           } else if (mEvt.type === 'PERSONALITY_SETTINGS_CHANGED') {
             const payload = mEvt.payload as { activeProfile?: any };
             if (payload?.activeProfile) {
@@ -309,38 +297,24 @@ export const App: React.FC = () => {
       }
     };
 
-    // Check system status
+    // Initial status checks
     fetch('/api/v1/system/status')
       .then(res => res.json())
-      .then(data => {
-        if (data.onlineStatus) {
-          setOnlineStatus(data.onlineStatus);
-        }
-      })
-      .catch(() => {
-        setOnlineStatus('NETWORK_UNAVAILABLE');
-      });
+      .then((data: any) => { if (data.onlineStatus) setOnlineStatus(data.onlineStatus); })
+      .catch(() => { setOnlineStatus('NETWORK_UNAVAILABLE'); });
 
-    // Check initial microphone status
     fetch('/api/v1/voice/mic/status')
       .then(res => res.json())
-      .then(data => {
-        if (data?.state) {
-          setMicState(data.state);
-        }
-        if (data?.voiceInputState) {
-          setVoiceInputState(data.voiceInputState);
-        }
+      .then((data: any) => {
+        if (data?.state) setMicState(data.state);
+        if (data?.voiceInputState) setVoiceInputState(data.voiceInputState);
       })
       .catch(() => {});
 
-    // Check voice settings (including persistent autoSpeak mode and selected voice)
     fetch('/api/v1/voice/settings')
       .then(res => res.json())
-      .then(data => {
-        if (data?.autoSpeak) {
-          setAutoSpeak(data.autoSpeak);
-        }
+      .then((data: any) => {
+        if (data?.autoSpeak) setAutoSpeak(data.autoSpeak);
         if (data?.selectedVoiceId) {
           setSelectedVoiceId(data.selectedVoiceId);
           const cleanName = data.selectedVoiceId.replace(/^onecore-|^local-/, '');
@@ -349,10 +323,9 @@ export const App: React.FC = () => {
       })
       .catch(() => {});
 
-    // Check model settings (including persistent selected model provider)
     fetch('/api/v1/model/settings')
       .then(res => res.json())
-      .then(data => {
+      .then((data: any) => {
         if (data?.selectedProvider) {
           setSelectedModel(data.selectedProvider);
           if (data?.selectedModel) setSelectedModelId(data.selectedModel);
@@ -364,10 +337,9 @@ export const App: React.FC = () => {
       })
       .catch(() => {});
 
-    // Check personality settings
     fetch('/api/v1/personalities/active')
       .then(res => res.json())
-      .then(data => {
+      .then((data: any) => {
         if (data?.id) {
           setSelectedPersonalityId(data.id);
           setSelectedPersonalityName(data.name || data.id);
@@ -376,11 +348,10 @@ export const App: React.FC = () => {
       })
       .catch(() => {});
 
-    return () => {
-      eventSource.close();
-    };
+    return () => { eventSource.close(); };
   }, []);
 
+  // ── Handlers ───────────────────────────────────────────────────────────────
   const handleSelectModel = async (providerId: string, modelId?: string) => {
     setSelectedModel(providerId);
     setSelectedModelId(modelId);
@@ -391,13 +362,10 @@ export const App: React.FC = () => {
       await fetch('/api/v1/model/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          selectedProvider: providerId,
-          selectedModel: modelId
-        })
+        body: JSON.stringify({ selectedProvider: providerId, selectedModel: modelId })
       });
     } catch (err) {
-      console.error('[MeghAI UI] Failed to persist model settings to server:', err);
+      console.error('[MeghAI UI] Failed to persist model settings:', err);
     }
   };
 
@@ -432,23 +400,17 @@ export const App: React.FC = () => {
       await fetch('/api/v1/voice/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          selectedVoiceId: voiceId,
-          ...(provider ? { selectedProvider: provider } : {})
-        })
+        body: JSON.stringify({ selectedVoiceId: voiceId, ...(provider ? { selectedProvider: provider } : {}) })
       });
     } catch {}
   };
 
   const handleSpeakMessage = async (msgId: string, text: string) => {
     if (speakingMsgId === msgId) {
-      try {
-        await fetch('/api/v1/voice/stop', { method: 'POST' });
-      } catch {}
+      try { await fetch('/api/v1/voice/stop', { method: 'POST' }); } catch {}
       setSpeakingMsgId(null);
       return;
     }
-
     setSpeakingMsgId(msgId);
     try {
       await fetch('/api/v1/voice/speak', {
@@ -463,9 +425,9 @@ export const App: React.FC = () => {
 
   const handleSendMessage = async (text: string) => {
     if (!text.trim()) return;
-
+    const commandId = `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const userMsg: ChatMessage = {
-      id: `usr-${Date.now()}`,
+      id: `usr-${commandId}`,
       sender: 'user',
       text,
       timestamp: new Date().toLocaleTimeString()
@@ -477,16 +439,13 @@ export const App: React.FC = () => {
       const res = await fetch('/api/v1/input/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          providerId: selectedModel,
-          modelId: selectedModelId
-        })
+        body: JSON.stringify({ text, commandId, providerId: selectedModel, modelId: selectedModelId })
       });
       const data = await res.json() as any;
-
+      const corrId = data.timelineCorrelationId || commandId;
+      const meghMsgId = `megh-resp-${corrId}`;
       const meghMsg: ChatMessage = {
-        id: `megh-${Date.now()}`,
+        id: meghMsgId,
         sender: 'megh',
         text: data.reply || data.clarificationPrompt || JSON.stringify(data),
         verificationStatus: data.verificationStatus,
@@ -495,7 +454,17 @@ export const App: React.FC = () => {
         modelId: data.modelId,
         timestamp: new Date().toLocaleTimeString()
       };
-      setMessages(prev => [...prev, meghMsg]);
+      setMessages(prev => {
+        const existingIdx = prev.findIndex(m =>
+          m.id === meghMsgId || (m.sender === 'megh' && (m.id.includes(corrId) || m.id.includes(commandId)))
+        );
+        if (existingIdx >= 0) {
+          const next = [...prev];
+          next[existingIdx] = { ...next[existingIdx], ...meghMsg };
+          return next;
+        }
+        return [...prev, meghMsg];
+      });
     } catch (err) {
       setMessages(prev => [
         ...prev,
@@ -528,9 +497,7 @@ export const App: React.FC = () => {
     try {
       const res = await fetch('/api/v1/system/kill/reset', { method: 'POST' });
       const data = await res.json() as any;
-      if (data.success) {
-        setAiState('READY');
-      }
+      if (data.success) setAiState('READY');
     } catch {
       setAiState('READY');
     }
@@ -570,28 +537,22 @@ export const App: React.FC = () => {
     }
   };
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        width: '100vw',
-        height: '100vh',
-        background: tokens.colors.bg.canvas,
-        color: tokens.colors.text.primary,
-        overflow: 'hidden',
-        position: 'relative'
-      }}
-    >
-      {/* Ambient Computational Physics Background */}
-      <AmbientBackground
-        aiState={aiState}
-        voiceInputState={voiceInputState}
-        micLevel={micLevel}
+    <>
+      {/* Ambient computational physics background (fixed, fullscreen) */}
+      <AmbientBackground aiState={aiState} voiceInputState={voiceInputState} micLevel={micLevel} />
+
+      {/* Left Nav Rail */}
+      <NavRail
+        activeTab={activeTab}
+        onSelectTab={setActiveTab}
+        onToggleTimeline={() => setIsTrailOpen(prev => !prev)}
+        eventCount={events.filter(e => e.type !== 'MIC_LEVEL' && (e.type as string) !== 'HEARTBEAT').length}
       />
 
-      {/* Master Top Bar */}
-      <TopBar
+      {/* Top HUD strip */}
+      <TopHUD
         aiState={aiState}
         micState={micState}
         voiceInputState={voiceInputState}
@@ -601,60 +562,60 @@ export const App: React.FC = () => {
         selectedModel={selectedModel}
         selectedVoiceName={selectedVoiceName}
         selectedPersonalityName={selectedPersonalityName}
-        eventCount={events.length}
-        activeTab={activeTab}
-        onSelectTab={setActiveTab}
         onToggleAutoSpeak={handleToggleAutoSpeak}
         onToggleMic={handleToggleMic}
         onOpenModelSelector={() => setIsModelSelectorOpen(true)}
         onOpenVoiceSelector={() => setIsVoiceSelectorOpen(true)}
         onOpenPersonalitySelector={() => setIsPersonalitySelectorOpen(true)}
-        onToggleTimeline={() => setIsTimelineOpen(prev => !prev)}
         onEmergencyStop={handleEmergencyStop}
         onResetEmergencyStop={handleResetEmergencyStop}
       />
 
-      {/* Main Workspace Frame */}
-      <main
-        style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          position: 'relative',
-          overflow: 'hidden',
-          background: 'radial-gradient(ellipse at 50% 12%, rgba(79, 168, 181, 0.03) 0%, rgba(7, 8, 10, 0.4) 70%)'
-        }}
-      >
+      {/* Main Workspace */}
+      <main className="workspace">
+        {/* ── Console (Home) ───────────────────────────────────────────── */}
         {activeTab === 'home' && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-            {/* Signature Central AI Core Visualization */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                padding: '12px 0 0',
-                flexShrink: 0
-              }}
-            >
+          <div className="console-layout">
+            {/* Living Brain */}
+            <div className="brain-container">
               <AICore
                 state={aiState}
-                size={230}
+                size={220}
                 micLevel={micLevel}
                 voiceInputState={voiceInputState}
                 personalityStyle={personalityStyle}
               />
+              <div
+                className="brain-state-label"
+                style={{
+                  color: aiState === 'LISTENING' ? '#5cb8c5'
+                    : aiState === 'SPEAKING' ? '#859bb0'
+                    : aiState === 'ROUTING' || aiState === 'PLANNING' || aiState === 'RESPONDING' ? '#7a8ea3'
+                    : aiState === 'EXECUTING' ? '#5c8fa8'
+                    : aiState === 'STOPPED' || aiState === 'FAILED' ? '#bf5049'
+                    : '#3f4551'
+                }}
+              >
+                {aiState}
+              </div>
             </div>
 
-            {/* Editorial Conversation View */}
-            <ChatView
+            {/* Conversation */}
+            <ConversationLayer
               messages={messages}
               speakingMsgId={speakingMsgId}
               onSpeakMessage={handleSpeakMessage}
               onSelectPrompt={prompt => handleSendMessage(prompt)}
             />
 
-            {/* Premium Command Composer */}
+            {/* Action Trail (compact inline event stream) */}
+            <ActionTrail
+              events={events}
+              isOpen={isTrailOpen}
+              onToggle={() => setIsTrailOpen(prev => !prev)}
+            />
+
+            {/* Command Composer */}
             <Composer
               value={inputText}
               onChange={setInputText}
@@ -671,7 +632,7 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {/* Dedicated Workspace Center Views */}
+        {/* ── Workspace Centers ────────────────────────────────────────── */}
         {activeTab === 'notes' && <NotesCenter />}
         {activeTab === 'tasks' && <TaskCenter />}
         {activeTab === 'memory' && <MemoryCenter />}
@@ -682,14 +643,14 @@ export const App: React.FC = () => {
         {activeTab === 'permissions' && <PermissionCenter />}
       </main>
 
-      {/* Contextual Action Timeline Drawer */}
+      {/* Legacy Timeline Drawer (kept for full event access) */}
       <ActionTimelineDrawer
         isOpen={isTimelineOpen}
         onClose={() => setIsTimelineOpen(false)}
         events={events}
       />
 
-      {/* First-Class Model Provider Selector Modal */}
+      {/* Modals */}
       <ModelSelectorModal
         isOpen={isModelSelectorOpen}
         selectedProvider={selectedModel}
@@ -698,7 +659,6 @@ export const App: React.FC = () => {
         onOpenProviderCenter={() => setActiveTab('providers')}
       />
 
-      {/* First-Class Voice Selector Modal */}
       <VoiceSelectorModal
         isOpen={isVoiceSelectorOpen}
         selectedVoiceId={selectedVoiceId}
@@ -706,7 +666,6 @@ export const App: React.FC = () => {
         onClose={() => setIsVoiceSelectorOpen(false)}
       />
 
-      {/* First-Class Personality Selector Modal */}
       <PersonalitySelectorModal
         isOpen={isPersonalitySelectorOpen}
         selectedPersonalityId={selectedPersonalityId}
@@ -722,12 +681,11 @@ export const App: React.FC = () => {
         onClose={() => setIsPersonalitySelectorOpen(false)}
       />
 
-      {/* Universal Command Palette (Ctrl+Space) */}
       <CommandPalette
         isOpen={isCommandPaletteOpen}
         onClose={() => setIsCommandPaletteOpen(false)}
         onSubmit={handleSendMessage}
       />
-    </div>
+    </>
   );
 };

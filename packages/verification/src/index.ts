@@ -193,9 +193,18 @@ export class VerificationEngine {
 
   /**
    * Verify process or application launch.
+   * Truthfully distinguishes freshly launched processes vs already running instances.
    */
-  public static verifyProcessLaunch(appName: string, pid?: number): VerificationResult {
+  public static verifyProcessLaunch(appName: string, pid?: number, alreadyRunning = false): VerificationResult {
     const timestamp = new Date().toISOString();
+    if (alreadyRunning && pid && pid > 0) {
+      return {
+        status: 'VERIFIED',
+        proof: `existing_pid:${pid}`,
+        details: `Application '${appName}' is already running (PID ${pid}). Focused existing instance.`,
+        timestamp
+      };
+    }
     if (pid && pid > 0) {
       return {
         status: 'VERIFIED',

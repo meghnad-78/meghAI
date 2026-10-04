@@ -1360,6 +1360,8 @@ export class MeghAIServer {
             const body = await this.readJsonBody(req) as {
               text: string;
               userConfirmed?: boolean;
+              commandId?: string;
+              source?: 'VOICE' | 'TEXT';
               providerId?: string;
               modelId?: string;
             };
@@ -1372,7 +1374,8 @@ export class MeghAIServer {
               : currentSettings.selectedModel;
 
             const result = await this.processUserRequest(body.text, body.userConfirmed, {
-              source: 'TEXT',
+              commandId: body.commandId,
+              source: body.source || 'TEXT',
               providerId: providerToUse,
               modelId: modelToUse
             });
@@ -1728,52 +1731,17 @@ export class MeghAIServer {
       return response;
     }
 
-    // B. Application Launch ("Hey Megh, open Chrome" / "launch Calculator")
-    if (intent === 'APPLICATION_CONTROL') {
-      const appEntity = pipeline.intent.entities.find(e => e.type === 'APPLICATION');
-      const appName = appEntity ? appEntity.value : 'calc';
-
-      this.setAIState('EXECUTING');
-      this.eventBus.publish('TOOL_REQUESTED', { toolName: 'windows_launch_app', appName }, correlationId);
-
-      const toolReq: ToolCallRequest = {
-        id: `call-app-${Date.now()}`,
-        toolName: 'windows_launch_app',
-        arguments: { appName },
-        userConfirmed
-      };
-
-      const executionResult = await this.toolRuntime.execute(toolReq);
-      this.setAIState('RESPONDING');
-      const response = {
-        status: executionResult.success ? 'COMPLETED' : 'FAILED',
-        outcome: executionResult.output,
-        verificationStatus: executionResult.verificationStatus,
-        reply: executionResult.success
-          ? `Successfully launched application '${appName}'.`
-          : `Could not launch application '${appName}': ${executionResult.error}`,
-        timelineCorrelationId: correlationId
-      };
-      this.setAIState('READY');
-      this.eventBus.publish('TASK_COMPLETED', {
-        ...response,
-        voiceSessionId: meta?.voiceSessionId,
-        commandId: meta?.commandId
-      }, correlationId);
-      if (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE') {
-        try {
-          await this.speakResponse(response.reply, correlationId);
-        } catch {}
-      }
-      return response;
-    }
-
-    // Universal Action Engine (v0.4.0)
+    // Universal Action Engine (v0.4.0) — Central Non-Bypassable Coordinator
     const textToCheck = pipeline.normalizedText || rawText;
-    if (this.actionOrchestrator.isActionRequest(rawText) || this.actionOrchestrator.isActionRequest(textToCheck)) {
+    if (
+      this.actionOrchestrator.isActionRequest(rawText) ||
+      this.actionOrchestrator.isActionRequest(textToCheck) ||
+      intent === 'APPLICATION_CONTROL'
+    ) {
       this.setAIState('PLANNING');
       const actionResult = await this.actionOrchestrator.process(textToCheck, {
-        commandId: meta?.commandId,
+        commandId: correlationId,
+        requestId: correlationId,
         voiceSessionId: meta?.voiceSessionId,
         source: meta?.source || 'TEXT',
         userConfirmed
@@ -1787,10 +1755,19 @@ export class MeghAIServer {
         this.setAIState('READY');
       }
 
-      this.eventBus.publish('TASK_COMPLETED', {
+      const response = {
         ...actionResult,
+        status: actionResult.status === 'SUCCEEDED' ? 'COMPLETED' : actionResult.status,
+        verificationStatus: actionResult.status === 'SUCCEEDED' ? 'VERIFIED' : 'FAILED',
+        verificationDetails: actionResult.steps?.[0]?.verificationResult?.details || 'Outcome verified.',
+        timelineCorrelationId: correlationId
+      };
+
+      this.eventBus.publish('TASK_COMPLETED', {
+        ...response,
         voiceSessionId: meta?.voiceSessionId,
-        commandId: meta?.commandId
+        commandId: meta?.commandId || correlationId,
+        timelineCorrelationId: correlationId
       }, correlationId);
 
       if (!KillSwitch.isActive() && (this.voiceSettings.getSettings().autoSpeak === 'ON' || meta?.source === 'VOICE')) {
@@ -1799,12 +1776,7 @@ export class MeghAIServer {
         } catch {}
       }
 
-      return {
-        ...actionResult,
-        status: actionResult.status === 'SUCCEEDED' ? 'COMPLETED' : actionResult.status,
-        verificationStatus: actionResult.status === 'SUCCEEDED' ? 'VERIFIED' : 'FAILED',
-        timelineCorrelationId: correlationId
-      };
+      return response;
     }
 
     // C. File Search ("Megh, find my resume" / "find *.pdf")

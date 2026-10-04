@@ -147,6 +147,7 @@ export class ToolRuntime {
   private handlers = new Map<string, ToolHandler>();
   private lockManager = new ResourceLockManager();
   private browserEngine = new SafeBrowserEngine({ allowLocalhost: false });
+  private executedCalls = new Map<string, ToolExecutionResult>();
 
   constructor(
     private registry: ToolRegistry,
@@ -154,6 +155,9 @@ export class ToolRuntime {
     private db?: MeghAIDatabase
   ) {
     this.registerStandardBuiltInHandlers();
+    KillSwitch.onReset(() => {
+      this.executedCalls.clear();
+    });
   }
 
   public setDatabase(db: MeghAIDatabase): void {
@@ -172,6 +176,11 @@ export class ToolRuntime {
     request: ToolCallRequest,
     context: ToolExecutionContext = {}
   ): Promise<ToolExecutionResult> {
+    // 0. Idempotency Check: Each specific tool call ID executes at most once
+    if (request.id && this.executedCalls.has(request.id)) {
+      return this.executedCalls.get(request.id)!;
+    }
+
     const startTime = Date.now();
     const tool = this.registry.get(request.toolName);
 
@@ -311,7 +320,8 @@ export class ToolRuntime {
       } else if (tool.verificationStrategy === 'PROCESS_RUNNING') {
         const app = String(request.arguments['appName'] || 'App');
         const pid = (rawOutput as any)?.pid;
-        const vResult = VerificationEngine.verifyProcessLaunch(app, pid);
+        const alreadyRunning = Boolean((rawOutput as any)?.alreadyRunning);
+        const vResult = VerificationEngine.verifyProcessLaunch(app, pid, alreadyRunning);
         verificationStatus = vResult.status;
         verificationDetails = vResult.details;
       } else if (tool.verificationStrategy === 'DATABASE_RECORD') {
@@ -325,7 +335,7 @@ export class ToolRuntime {
 
       // Check for unconfigured adapters
       if ((rawOutput as any)?.status === 'NOT_CONNECTED') {
-        return {
+        const unconnResult: ToolExecutionResult = {
           toolCallId: request.id,
           toolName: request.toolName,
           success: false,
@@ -335,9 +345,13 @@ export class ToolRuntime {
           verificationStatus: 'UNVERIFIED',
           verificationDetails: 'Adapter not configured: external operation was not performed.'
         };
+        if (request.id) {
+          this.executedCalls.set(request.id, unconnResult);
+        }
+        return unconnResult;
       }
 
-      return {
+      const finalResult: ToolExecutionResult = {
         toolCallId: request.id,
         toolName: request.toolName,
         success: verificationStatus !== 'FAILED',
@@ -346,6 +360,10 @@ export class ToolRuntime {
         verificationStatus,
         verificationDetails
       };
+      if (request.id) {
+        this.executedCalls.set(request.id, finalResult);
+      }
+      return finalResult;
     } catch (err) {
       this.lockManager.release(lockKey);
       return {
@@ -518,36 +536,51 @@ export class ToolRuntime {
       return this.browserEngine.getActiveTab();
     });
 
-    this.registerHandler('browser.navigate', async (args) => {
-      const url = String(args['url']);
-      return await this.browserEngine.navigate(url);
-    });
+    this.registerHandler('browser.navigate', async (args) => { const url = String(args['url']); return await this.browserEngine.navigate(url); });
+    this.registerHandler('web.search', async (args) => { const query = String(args['query']); return await this.browserEngine.search(query); });
+    this.registerHandler('browser.search_in_page', async (args) => { const query = String(args['query']); return await this.browserEngine.searchInPage(query); });
+    this.registerHandler('browser.read_page', async (args) => { if (args['url']) { return await this.browserEngine.navigate(String(args['url'])); } return this.browserEngine.readPage(); });
+    this.registerHandler('browser.get_tabs', async () => { return this.browserEngine.listTabs(); });
+    this.registerHandler('browser.switch_tab', async (args) => { const tabId = String(args['tabId']); return this.browserEngine.switchTab(tabId); });
+    this.registerHandler('browser.close_tab', async (args) => { const tabId = String(args['tabId']); return this.browserEngine.closeTab(tabId); });
+    this.registerHandler('browser.click', async (args) => { const selector = String(args['selector']); return await this.browserEngine.click(selector); });
 
-    this.registerHandler('browser.search', async (args) => {
-      const query = String(args['query']);
-      return await this.browserEngine.search(query);
-    });
+      this.registerHandler('browser.click_first_result', async () => {
+        return await this.browserEngine.clickFirstOrganicResult();
+      });
 
-    this.registerHandler('browser.read_page', async (args) => {
-      if (args['url']) {
-        return await this.browserEngine.navigate(String(args['url']));
-      }
-      return this.browserEngine.getActiveTab();
-    });
+      this.registerHandler('browser.type', async (args) => {
+        const selector = String(args['selector']);
+        const text = String(args['text']);
+        await this.browserEngine.type(selector, text);
+        return { status: 'VERIFIED', action: 'TYPED_IN_BROWSER', selector };
+      });
 
-    this.registerHandler('browser.get_tabs', async () => {
-      return this.browserEngine.listTabs();
-    });
+      this.registerHandler('browser.scroll', async (args) => {
+        const direction = String(args['direction']) as 'up' | 'down';
+        await this.browserEngine.scroll(direction);
+        return { status: 'VERIFIED', action: 'SCROLLED_BROWSER', direction };
+      });
 
-    this.registerHandler('browser.switch_tab', async (args) => {
-      const tabId = String(args['tabId']);
-      return this.browserEngine.switchTab(tabId);
-    });
+      this.registerHandler('browser.wait', async (args) => {
+        const ms = Number(args['ms']);
+        await this.browserEngine.wait(ms);
+        return { status: 'VERIFIED', action: 'WAITED_IN_BROWSER', ms };
+      });
 
-    this.registerHandler('browser.close_tab', async (args) => {
-      const tabId = String(args['tabId']);
-      return this.browserEngine.closeTab(tabId);
-    });
+      this.registerHandler('browser.extract', async (args) => {
+        const selector = String(args['selector']);
+        return await this.browserEngine.extract(selector);
+      });
+
+      this.registerHandler('browser.download', async (args) => {
+        const urlOrSelector = String(args['urlOrSelector']);
+        return await this.browserEngine.download(urlOrSelector);
+      });
+
+      this.registerHandler('browser.screenshot', async () => {
+        return await this.browserEngine.screenshot();
+      });
 
     // -------------------------------------------------------------------------
     // PRODUCTIVITY: NOTES, TASKS, DOCUMENTS
@@ -778,3 +811,6 @@ export class ToolRuntime {
     return null;
   }
 }
+
+
+
