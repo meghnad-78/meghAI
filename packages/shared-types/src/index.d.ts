@@ -228,7 +228,7 @@ export interface WorkspaceEntry {
     createdAt: string;
     updatedAt: string;
 }
-export type EventType = 'USER_INPUT_RECEIVED' | 'WAKE_DETECTED' | 'MIC_STARTING' | 'MIC_READY' | 'MIC_LISTENING' | 'MIC_LEVEL' | 'MIC_STOPPING' | 'MIC_OFF' | 'MIC_ERROR' | 'MIC_DEVICE_UNAVAILABLE' | 'VAD_SPEECH_STARTED' | 'VAD_SPEECH_ENDED' | 'VOICE_INPUT_STATE_CHANGED' | 'VOICE_COMMAND_RECEIVED' | 'VOICE_TRANSCRIBING' | 'TRANSCRIPT_PARTIAL' | 'TRANSCRIPT_FINAL' | 'VOICE_MODEL_RATE_LIMITED' | 'STT_STARTED' | 'STT_COMPLETED' | 'TTS_REQUESTED' | 'TTS_STARTED' | 'TTS_AUDIO_READY' | 'AUDIO_PLAYBACK_STARTED' | 'SPEAKING' | 'AUDIO_PLAYBACK_COMPLETED' | 'TTS_COMPLETED' | 'TTS_FAILED' | 'AUDIO_PLAYBACK_FAILED' | 'TTS_INTERRUPTED' | 'AUDIO_CUE_STARTED' | 'AUDIO_CUE_COMPLETED' | 'AUDIO_STATE_CHANGED' | 'VOICE_ERROR' | 'VOICE_RECOGNITION_GATED' | 'VOICE_RECOGNITION_RESUMED' | 'INTERRUPTED' | 'LANGUAGE_DETECTED' | 'INTENT_CLASSIFIED' | 'CONTEXT_RETRIEVED' | 'MEMORY_RETRIEVED' | 'PLAN_CREATED' | 'MODEL_SELECTED' | 'MODEL_STARTED' | 'MODEL_CHUNK' | 'MODEL_FALLBACK' | 'MODEL_COMPLETED' | 'TOOL_REQUESTED' | 'TOOL_APPROVAL_REQUIRED' | 'TOOL_STARTED' | 'TOOL_COMPLETED' | 'VERIFICATION_STARTED' | 'VERIFICATION_COMPLETED' | 'TASK_COMPLETED' | 'TASK_FAILED' | 'TASK_CANCELLED' | 'KILL_SWITCH_ACTIVATED' | 'MEMORY_COMMAND_DETECTED' | 'MEMORY_CANDIDATE_CREATED' | 'MEMORY_PROMOTED' | 'MEMORY_STORED' | 'MEMORY_DELETED' | 'ROUTINE_TRIGGERED' | 'MODEL_SETTINGS_CHANGED' | 'PERSONALITY_SETTINGS_CHANGED' | 'WAKE_ACTIVATION_STARTED' | 'AI_STATE_CHANGED';
+export type EventType = 'USER_INPUT_RECEIVED' | 'WAKE_DETECTED' | 'MIC_STARTING' | 'MIC_READY' | 'MIC_LISTENING' | 'MIC_LEVEL' | 'MIC_STOPPING' | 'MIC_OFF' | 'MIC_ERROR' | 'MIC_DEVICE_UNAVAILABLE' | 'VAD_SPEECH_STARTED' | 'VAD_SPEECH_ENDED' | 'VOICE_INPUT_STATE_CHANGED' | 'VOICE_COMMAND_RECEIVED' | 'VOICE_TRANSCRIBING' | 'TRANSCRIPT_PARTIAL' | 'TRANSCRIPT_FINAL' | 'VOICE_MODEL_RATE_LIMITED' | 'STT_STARTED' | 'STT_COMPLETED' | 'TTS_REQUESTED' | 'TTS_STARTED' | 'TTS_AUDIO_READY' | 'AUDIO_PLAYBACK_STARTED' | 'SPEAKING' | 'AUDIO_PLAYBACK_COMPLETED' | 'TTS_COMPLETED' | 'TTS_FAILED' | 'TTS_FALLBACK' | 'TTS_FALLBACK_TRIGGERED' | 'AUDIO_PLAYBACK_FAILED' | 'TTS_INTERRUPTED' | 'AUDIO_CUE_STARTED' | 'AUDIO_CUE_COMPLETED' | 'AUDIO_STATE_CHANGED' | 'VOICE_ERROR' | 'VOICE_NO_SPEECH_DETECTED' | 'VOICE_DIAGNOSTICS_UPDATED' | 'VOICE_RECOGNITION_GATED' | 'VOICE_RECOGNITION_RESUMED' | 'INTERRUPTED' | 'LANGUAGE_DETECTED' | 'INTENT_CLASSIFIED' | 'CONTEXT_RETRIEVED' | 'MEMORY_RETRIEVED' | 'PLAN_CREATED' | 'MODEL_SELECTED' | 'MODEL_STARTED' | 'MODEL_CHUNK' | 'MODEL_FALLBACK' | 'MODEL_COMPLETED' | 'TOOL_REQUESTED' | 'TOOL_APPROVAL_REQUIRED' | 'TOOL_STARTED' | 'TOOL_COMPLETED' | 'VERIFICATION_STARTED' | 'VERIFICATION_COMPLETED' | 'TASK_COMPLETED' | 'TASK_FAILED' | 'TASK_CANCELLED' | 'KILL_SWITCH_ACTIVATED' | 'MEMORY_COMMAND_DETECTED' | 'MEMORY_CANDIDATE_CREATED' | 'MEMORY_PROMOTED' | 'MEMORY_STORED' | 'MEMORY_DELETED' | 'ROUTINE_TRIGGERED' | 'MODEL_SETTINGS_CHANGED' | 'PERSONALITY_SETTINGS_CHANGED' | 'WAKE_ACTIVATION_STARTED' | 'AI_STATE_CHANGED';
 export interface MeghAIEvent<T = unknown> {
     id: string;
     type: EventType;
@@ -305,7 +305,47 @@ export interface TTSSynthesisResult {
     format: 'wav' | 'mp3';
     sampleRate?: number;
     voiceId: string;
+    providerId?: string;
     spokenText: string;
+    fallbackTriggered?: boolean;
+    fallbackReason?: string;
+    originalVoiceId?: string;
+}
+export interface VoiceTurnDiagnostic {
+    voiceSessionId: string;
+    commandId: string;
+    micDeviceId: string | number;
+    micSampleRate: number;
+    micChannels: number;
+    audioFramesReceived: number;
+    audioBytesReceived: number;
+    averageRms: number;
+    maxRms: number;
+    vadState: string;
+    wakeState: string;
+    commandCaptureState: string;
+    sttProvider: string;
+    sttModel: string;
+    sttConnectionState: string;
+    sttFramesSent: number;
+    sttPartialTranscripts: string[];
+    sttFinalTranscript: string;
+    modelProviderRequested: string;
+    modelSelected: string;
+    modelLatencyMs: number;
+    ttsProviderRequested: string;
+    ttsVoiceRequested: string;
+    ttsProviderResolved: string;
+    ttsVoiceResolved: string;
+    ttsFallbackTriggered: boolean;
+    ttsFallbackReason?: string;
+    ttsAudioFormat: string;
+    ttsAudioBytes: number;
+    audioOutputDeviceId: string;
+    audioOutputLatencyMs: number;
+    completedSuccessfully: boolean;
+    failurePoint?: string;
+    timestamp?: number;
 }
 export interface TTSProvider {
     readonly id: string;

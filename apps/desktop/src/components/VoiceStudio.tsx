@@ -8,6 +8,8 @@ import type {
   AudioCaptureDiagnostics,
   AudioCueType
 } from '@meghai/shared-types';
+import { tokens } from '../theme/tokens.js';
+import { Icons } from './ui/Icons.js';
 
 export const VoiceStudio: React.FC = () => {
   const [voices, setVoices] = useState<VoiceProfile[]>([]);
@@ -50,6 +52,8 @@ export const VoiceStudio: React.FC = () => {
   const [inputDevices, setInputDevices] = useState<Array<{ id: number; name: string; channels: number }>>([]);
   const [micLevel, setMicLevel] = useState<number>(0);
   const [isMicLoading, setIsMicLoading] = useState<boolean>(false);
+  const [diagnostics, setDiagnostics] = useState<any>(null);
+  const [ttsFallbackEvent, setTtsFallbackEvent] = useState<{ originalVoiceId?: string; fallbackVoiceId?: string; reason?: string } | null>(null);
 
   const loadData = async () => {
     try {
@@ -96,6 +100,11 @@ export const VoiceStudio: React.FC = () => {
     loadData();
     loadMicData();
 
+    fetch('/api/v1/voice/diagnostics/last')
+      .then(res => res.json())
+      .then(data => { if (data) setDiagnostics(data); })
+      .catch(() => {});
+
     const eventSource = new EventSource('/api/v1/events/stream');
     eventSource.onmessage = e => {
       try {
@@ -122,6 +131,12 @@ export const VoiceStudio: React.FC = () => {
         } else if (evt.type === 'MIC_DEVICE_UNAVAILABLE') {
           setMicState('MIC_DEVICE_UNAVAILABLE');
           setMicLevel(0);
+        } else if (evt.type === 'VOICE_DIAGNOSTICS_UPDATED') {
+          if (evt.payload?.diagnostic) setDiagnostics(evt.payload.diagnostic);
+        } else if (evt.type === 'TTS_FALLBACK' || evt.type === 'TTS_FALLBACK_TRIGGERED') {
+          setTtsFallbackEvent(evt.payload);
+        } else if (evt.type === 'TTS_COMPLETED') {
+          setTtsFallbackEvent(null);
         }
       } catch {}
     };
@@ -160,13 +175,29 @@ export const VoiceStudio: React.FC = () => {
   };
 
   const handleUpdateSettings = async (updates: Partial<VoiceSettings>) => {
-    const next = { ...settings, ...updates };
+    let extraUpdates = { ...updates };
+    if (updates.selectedVoiceId && !updates.selectedProvider) {
+      const vid = updates.selectedVoiceId;
+      const matched = voices.find(v => v.id === vid);
+      if (matched?.provider) {
+        extraUpdates.selectedProvider = matched.provider;
+      } else if (vid.startsWith('eleven-') || vid.startsWith('elevenlabs-')) {
+        extraUpdates.selectedProvider = 'elevenlabs';
+      } else if (vid.startsWith('goog-') || vid.startsWith('google-')) {
+        extraUpdates.selectedProvider = 'google-cloud';
+      } else if (vid.startsWith('openai-')) {
+        extraUpdates.selectedProvider = 'openai';
+      } else if (vid.startsWith('onecore-') || vid.startsWith('sapi-') || vid.startsWith('local-')) {
+        extraUpdates.selectedProvider = 'windows-onecore';
+      }
+    }
+    const next = { ...settings, ...extraUpdates };
     setSettings(next);
     try {
       await fetch('/api/v1/voice/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
+        body: JSON.stringify(extraUpdates)
       });
     } catch {
       // Handle error
@@ -181,7 +212,7 @@ export const VoiceStudio: React.FC = () => {
 
     setIsPlaying(true);
     setActiveVoicePlaying(voiceId);
-    setPreviewStatus(`Synthesizing and playing speech through Windows default audio device...`);
+    setPreviewStatus(`Synthesizing speech via audio endpoint...`);
     try {
       const res = await fetch('/api/v1/voice/preview', {
         method: 'POST',
@@ -190,7 +221,7 @@ export const VoiceStudio: React.FC = () => {
       });
       const data = await res.json() as any;
       if (res.ok) {
-        setPreviewStatus(`✓ Audio spoken successfully (${data.speechRate}x rate, ${data.durationMs ? `${data.durationMs}ms` : 'completed'})`);
+        setPreviewStatus(`Speech synthesis completed (${data.speechRate}x rate${data.durationMs ? `, ${data.durationMs}ms` : ''})`);
       } else {
         setPreviewStatus(`Synthesis error: ${data.error || 'Failed'}`);
       }
@@ -205,7 +236,7 @@ export const VoiceStudio: React.FC = () => {
 
   const handlePlayCue = async (cue: AudioCueType) => {
     setActiveCuePlaying(cue);
-    setCueStatus(`Synthesizing & playing "${cue}" audio cue...`);
+    setCueStatus(`Synthesizing ${cue} acoustic cue...`);
     try {
       const res = await fetch('/api/v1/voice/cue', {
         method: 'POST',
@@ -214,9 +245,9 @@ export const VoiceStudio: React.FC = () => {
       });
       const data = await res.json() as any;
       if (res.ok) {
-        setCueStatus(`✓ Played procedural "${cue}" cue (${data.format || '16kHz PCM WAV'})`);
+        setCueStatus(`Procedural ${cue} executed (${data.format || '16kHz PCM WAV'})`);
       } else {
-        setCueStatus(`Audio cue error: ${data.error || 'Failed'}`);
+        setCueStatus(`Acoustic error: ${data.error || 'Failed'}`);
       }
     } catch (err) {
       setCueStatus(`Cue error: ${(err as Error).message}`);
@@ -272,130 +303,229 @@ export const VoiceStudio: React.FC = () => {
     return true;
   });
 
-  const personalities: Array<{ id: PersonalityMode; title: string; desc: string; icon: string }> = [
-    { id: 'FUTURISTIC_COMPANION', title: 'Futuristic Companion', desc: 'Omnipresent, razor-sharp intelligence partner.', icon: '⚡' },
-    { id: 'PROFESSIONAL', title: 'Executive Professional', desc: 'Direct, clear, and action-oriented precision.', icon: '💼' },
-    { id: 'WARM', title: 'Warm & Empathetic', desc: 'Friendly, courteous, accessible, and supportive.', icon: '☀️' },
-    { id: 'CALM_ASSISTANT', title: 'Calm & Deliberate', desc: 'Peaceful, minimalist, and unhurried focus.', icon: '🌿' }
+  const personalities: Array<{ id: PersonalityMode; title: string; desc: string }> = [
+    { id: 'FUTURISTIC_COMPANION', title: 'Futuristic Companion', desc: 'Omnipresent, analytical intelligence partner.' },
+    { id: 'PROFESSIONAL', title: 'Executive Professional', desc: 'Direct, clear, action-oriented precision.' },
+    { id: 'WARM', title: 'Warm & Empathetic', desc: 'Accessible, supportive, and conversational clarity.' },
+    { id: 'CALM_ASSISTANT', title: 'Calm & Deliberate', desc: 'Minimalist, unhurried, focused acoustic pace.' }
   ];
 
-  const autoSpeakModes: Array<{ mode: AutoSpeakMode; label: string; desc: string; icon: string }> = [
-    { mode: 'OFF', label: 'Off', desc: 'Text-only responses. Audio is silent.', icon: '🔇' },
-    { mode: 'ON', label: 'Always Speak', desc: 'MeghAI automatically speaks all responses through Windows audio.', icon: '🔊' },
-    { mode: 'ASK', label: 'Ask / Manual', desc: 'Audio played on-demand or push-to-talk.', icon: '🎙️' }
+  const autoSpeakModes: Array<{ mode: AutoSpeakMode; label: string; desc: string }> = [
+    { mode: 'OFF', label: 'Silent Text', desc: 'Text-only responses. Audio synthesis remains dormant.' },
+    { mode: 'ON', label: 'Continuous Speech', desc: 'Automatically synthesizes all conversational responses.' },
+    { mode: 'ASK', label: 'On Demand', desc: 'Synthesizes only on explicit user request or push-to-talk.' }
   ];
 
   const proceduralCues: Array<{
     cue: AudioCueType;
     label: string;
-    icon: string;
     desc: string;
-    color: string;
   }> = [
-    { cue: 'startup', label: 'Startup Chime', icon: '🚀', desc: 'Ascending triad + shimmer on boot', color: '#00f0ff' },
-    { cue: 'listening', label: 'Listening Ping', icon: '🎙️', desc: 'Dual-frequency detection ping', color: '#ef4444' },
-    { cue: 'thinking', label: 'Thinking Tone', icon: '🧠', desc: 'Pulsing low harmonic thinking cycle', color: '#f59e0b' },
-    { cue: 'answer_ready', label: 'Answer Ready', icon: '✨', desc: 'Gentle rising chime before speech', color: '#10b981' },
-    { cue: 'interrupt', label: 'Interrupt Cue', icon: '🛑', desc: 'Rapid falling brake chirp', color: '#ec4899' }
+    { cue: 'startup', label: 'System Startup', desc: 'Ascending triad resonance' },
+    { cue: 'listening', label: 'Listening Ping', desc: 'Dual-frequency acoustic detection' },
+    { cue: 'thinking', label: 'Thinking Texture', desc: 'Sub-harmonic harmonic resonance' },
+    { cue: 'answer_ready', label: 'Answer Ready', desc: 'Ascending triad resolution' },
+    { cue: 'interrupt', label: 'Interruption Cue', desc: 'Falling damping brake' }
   ];
 
   const getProviderBadge = (provider: string) => {
     switch (provider) {
       case 'windows-onecore':
-        return { label: 'Windows OneCore', bg: 'rgba(0, 240, 255, 0.15)', border: '#00f0ff', color: '#38bdf8' };
+        return { label: 'Windows OneCore', color: tokens.colors.accent.primary };
       case 'windows-sapi':
       case 'local':
-        return { label: 'Windows SAPI', bg: 'rgba(148, 163, 184, 0.15)', border: '#94a3b8', color: '#cbd5e1' };
+        return { label: 'Windows SAPI', color: tokens.colors.text.secondary };
       case 'google-cloud':
       case 'google-cloud-tts':
       case 'google':
-        return { label: 'Google Cloud', bg: 'rgba(168, 85, 247, 0.15)', border: '#a855f7', color: '#d8b4fe' };
+        return { label: 'Google Cloud', color: tokens.colors.semantic.info };
       case 'elevenlabs':
-        return { label: 'ElevenLabs', bg: 'rgba(16, 185, 129, 0.15)', border: '#10b981', color: '#6ee7b7' };
+        return { label: 'ElevenLabs', color: tokens.colors.semantic.success };
       case 'openai':
-        return { label: 'OpenAI Speech', bg: 'rgba(234, 179, 8, 0.15)', border: '#eab308', color: '#fde047' };
+        return { label: 'OpenAI Speech', color: tokens.colors.semantic.warning };
       default:
-        return { label: provider, bg: 'rgba(255, 255, 255, 0.05)', border: 'rgba(255, 255, 255, 0.1)', color: '#94a3b8' };
+        return { label: provider, color: tokens.colors.text.muted };
     }
   };
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', padding: '24px', overflowY: 'auto' }}>
-      {/* Header & Controls */}
-      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        padding: '28px 36px',
+        overflowY: 'auto',
+        maxWidth: '1200px',
+        margin: '0 auto',
+        width: '100%',
+        boxSizing: 'border-box'
+      }}
+    >
+      {/* Console Header */}
+      <div
+        style={{
+          marginBottom: '24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          borderBottom: `1px solid ${tokens.colors.border.subtle}`,
+          paddingBottom: '20px'
+        }}
+      >
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#f8fafc' }}>Voice & Personality Studio</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ color: tokens.colors.accent.primary, display: 'flex', alignItems: 'center' }}>
+              <Icons.Voice size={22} />
+            </span>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: tokens.typography.sizes.xl,
+                fontWeight: 600,
+                color: tokens.colors.text.primary,
+                letterSpacing: tokens.typography.letterSpacing.tight,
+                fontFamily: tokens.typography.fontDisplay
+              }}
+            >
+              Acoustic Console & Voice Studio
+            </h2>
             {catalogStats && (
-              <span style={{
-                fontSize: '11px',
-                fontWeight: 700,
-                padding: '2px 8px',
-                borderRadius: '12px',
-                background: 'rgba(0, 240, 255, 0.15)',
-                border: '1px solid rgba(0, 240, 255, 0.4)',
-                color: '#00f0ff'
-              }}>
-                {catalogStats.totalVoices} Voices Across 4 Providers
+              <span
+                style={{
+                  fontSize: tokens.typography.sizes.xs,
+                  fontWeight: 600,
+                  padding: '3px 8px',
+                  borderRadius: tokens.radii.sm,
+                  background: tokens.colors.accent.primarySubtle,
+                  border: `1px solid ${tokens.colors.border.accentSubtle}`,
+                  color: tokens.colors.accent.primary,
+                  fontFamily: tokens.typography.fontMono
+                }}
+              >
+                {catalogStats.totalVoices} VOICES • 5 PROVIDERS
               </span>
             )}
           </div>
-          <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
-            Multi-provider voice synthesis, procedural acoustic cues, auto-speak configuration, and native microphone telemetry.
+          <p
+            style={{
+              margin: '6px 0 0',
+              fontSize: tokens.typography.sizes.sm,
+              color: tokens.colors.text.secondary
+            }}
+          >
+            Multi-provider speech synthesis, procedural Web Audio cues, WASAPI acoustic telemetry, and output dispatch.
           </p>
         </div>
+
         {(isPlaying || activeCuePlaying) && (
           <button
             onClick={handleStopPlayback}
             style={{
-              background: 'rgba(239, 68, 68, 0.2)',
-              border: '1px solid #ef4444',
-              color: '#fca5a5',
-              borderRadius: '8px',
-              padding: '6px 14px',
-              fontSize: '12px',
-              fontWeight: 700,
+              background: tokens.colors.semantic.errorMuted,
+              border: `1px solid ${tokens.colors.semantic.error}`,
+              color: tokens.colors.semantic.error,
+              borderRadius: tokens.radii.sm,
+              padding: '7px 14px',
+              fontSize: tokens.typography.sizes.xs,
+              fontWeight: 600,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px'
+              gap: '6px',
+              fontFamily: tokens.typography.fontMono
             }}
           >
-            <span>■</span> Stop Audio Output
+            <Icons.Stop size={13} />
+            STOP AUDIO OUTPUT
           </button>
         )}
       </div>
 
-      {/* Catalog Telemetry Bar */}
+      {/* Catalog Telemetry Strip */}
       {catalogStats && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '10px',
-          marginBottom: '20px'
-        }}>
-          <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
-            <div style={{ fontSize: '11px', color: '#94a3b8' }}>Total Catalog Voices</div>
-            <div style={{ fontSize: '18px', fontWeight: 700, color: '#f8fafc', marginTop: '2px' }}>
-              {catalogStats.totalVoices} Across 5 Providers
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: '10px',
+            marginBottom: '20px'
+          }}
+        >
+          <div
+            style={{
+              padding: '12px 16px',
+              borderRadius: tokens.radii.md,
+              background: tokens.colors.bg.surface,
+              border: `1px solid ${tokens.colors.border.default}`
+            }}
+          >
+            <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
+              Catalog Depth
+            </div>
+            <div style={{ fontSize: tokens.typography.sizes.xl, fontWeight: 600, color: tokens.colors.text.primary, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+              {catalogStats.totalVoices}
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.faint, marginTop: '2px' }}>
+              Across 5 integrated providers
             </div>
           </div>
-          <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(0, 240, 255, 0.2)' }}>
-            <div style={{ fontSize: '11px', color: '#38bdf8' }}>Offline Ready (Windows SAPI + OneCore)</div>
-            <div style={{ fontSize: '18px', fontWeight: 700, color: '#00f0ff', marginTop: '2px' }}>
-              {catalogStats.totalOfflineReady} Voices (100% Local)
+
+          <div
+            style={{
+              padding: '12px 16px',
+              borderRadius: tokens.radii.md,
+              background: tokens.colors.bg.surface,
+              border: `1px solid ${tokens.colors.border.default}`
+            }}
+          >
+            <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.accent.primary, textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
+              Offline Ready
+            </div>
+            <div style={{ fontSize: tokens.typography.sizes.xl, fontWeight: 600, color: tokens.colors.accent.primary, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+              {catalogStats.totalOfflineReady}
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.faint, marginTop: '2px' }}>
+              Windows SAPI + OneCore (Local)
             </div>
           </div>
-          <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(168, 85, 247, 0.2)' }}>
-            <div style={{ fontSize: '11px', color: '#c084fc' }}>Cloud AI (Google + ElevenLabs + OpenAI)</div>
-            <div style={{ fontSize: '18px', fontWeight: 700, color: '#d8b4fe', marginTop: '2px' }}>
-              {catalogStats.totalCloud} Voices
+
+          <div
+            style={{
+              padding: '12px 16px',
+              borderRadius: tokens.radii.md,
+              background: tokens.colors.bg.surface,
+              border: `1px solid ${tokens.colors.border.default}`
+            }}
+          >
+            <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.semantic.info, textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
+              Cloud Synthesizers
+            </div>
+            <div style={{ fontSize: tokens.typography.sizes.xl, fontWeight: 600, color: tokens.colors.semantic.info, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+              {catalogStats.totalCloud}
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.faint, marginTop: '2px' }}>
+              Google + ElevenLabs + OpenAI
             </div>
           </div>
-          <div style={{ padding: '10px 14px', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-            <div style={{ fontSize: '11px', color: '#6ee7b7' }}>Available Right Now</div>
-            <div style={{ fontSize: '18px', fontWeight: 700, color: '#10b981', marginTop: '2px' }}>
-              {catalogStats.totalAvailable} Active
+
+          <div
+            style={{
+              padding: '12px 16px',
+              borderRadius: tokens.radii.md,
+              background: tokens.colors.bg.surface,
+              border: `1px solid ${tokens.colors.border.default}`
+            }}
+          >
+            <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.semantic.success, textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
+              Available Active
+            </div>
+            <div style={{ fontSize: tokens.typography.sizes.xl, fontWeight: 600, color: tokens.colors.semantic.success, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+              {catalogStats.totalAvailable}
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.faint, marginTop: '2px' }}>
+              Ready for immediate playback
             </div>
           </div>
         </div>
@@ -409,88 +539,152 @@ export const VoiceStudio: React.FC = () => {
         const isSpeakingThis = isPlaying && activeVoicePlaying === activeProfile.id;
 
         return (
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(0, 240, 255, 0.08) 0%, rgba(138, 43, 226, 0.08) 100%)',
-            border: `1px solid ${isSpeakingThis ? '#c084fc' : 'rgba(0, 240, 255, 0.3)'}`,
-            borderRadius: '12px',
-            padding: '16px 20px',
-            marginBottom: '20px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            boxShadow: '0 4px 20px rgba(0, 240, 255, 0.05)'
-          }}>
+          <div
+            style={{
+              background: tokens.colors.bg.elevated,
+              border: `1px solid ${isSpeakingThis ? tokens.colors.accent.primary : tokens.colors.border.strong}`,
+              borderRadius: tokens.radii.md,
+              padding: '16px 20px',
+              marginBottom: '20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}
+          >
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                <span style={{ fontSize: '11px', fontWeight: 700, color: '#00f0ff', letterSpacing: '0.05em' }}>
+                <span
+                  style={{
+                    fontSize: tokens.typography.sizes.xs,
+                    fontWeight: 600,
+                    color: tokens.colors.accent.primary,
+                    letterSpacing: tokens.typography.letterSpacing.wide,
+                    fontFamily: tokens.typography.fontMono
+                  }}
+                >
                   ACTIVE SYSTEM VOICE
                 </span>
-                <span style={{
-                  fontSize: '10px',
-                  padding: '2px 8px',
-                  borderRadius: '6px',
-                  background: badge.bg,
-                  border: `1px solid ${badge.border}`,
-                  color: badge.color,
-                  fontWeight: 700
-                }}>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    padding: '2px 8px',
+                    borderRadius: tokens.radii.xs,
+                    background: tokens.colors.bg.surface,
+                    border: `1px solid ${tokens.colors.border.default}`,
+                    color: badge.color,
+                    fontWeight: 600
+                  }}
+                >
                   {badge.label}
                 </span>
-                <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.06)', color: '#cbd5e1' }}>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    padding: '2px 6px',
+                    borderRadius: tokens.radii.xs,
+                    background: tokens.colors.bg.surface,
+                    color: tokens.colors.text.secondary,
+                    fontFamily: tokens.typography.fontMono
+                  }}
+                >
                   {activeProfile.language} • {activeProfile.gender}
                 </span>
                 {isSpeakingThis && (
-                  <span style={{ fontSize: '10px', color: '#c084fc', fontWeight: 700 }}>
-                    ● LIVE PLAYING THROUGH AUDIO DEVICE
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      color: tokens.colors.accent.primary,
+                      fontWeight: 600,
+                      fontFamily: tokens.typography.fontMono
+                    }}
+                  >
+                    ● PLAYING LIVE
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: '#f8fafc' }}>
+              <div
+                style={{
+                  fontSize: tokens.typography.sizes.lg,
+                  fontWeight: 600,
+                  color: tokens.colors.text.primary,
+                  fontFamily: tokens.typography.fontDisplay
+                }}
+              >
                 {activeProfile.name}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
                 {(activeProfile.characteristics || ['natural', 'articulate']).map(c => (
-                  <span key={c} style={{ fontSize: '10px', padding: '2px 7px', borderRadius: '12px', background: 'rgba(0, 240, 255, 0.12)', border: '1px solid rgba(0, 240, 255, 0.25)', color: '#38bdf8' }}>
+                  <span
+                    key={c}
+                    style={{
+                      fontSize: '11px',
+                      padding: '2px 7px',
+                      borderRadius: tokens.radii.xs,
+                      background: tokens.colors.bg.surface,
+                      border: `1px solid ${tokens.colors.border.subtle}`,
+                      color: tokens.colors.text.secondary
+                    }}
+                  >
                     #{c}
                   </span>
                 ))}
               </div>
             </div>
+
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <button
                 onClick={() => handlePreview(activeProfile.id)}
                 disabled={!activeProfile.available && !activeProfile.isAvailable && activeVoicePlaying !== activeProfile.id}
                 style={{
-                  background: isSpeakingThis ? 'rgba(239, 68, 68, 0.25)' : '#00f0ff',
-                  border: isSpeakingThis ? '1px solid #ef4444' : 'none',
-                  color: isSpeakingThis ? '#ef4444' : '#07090e',
-                  borderRadius: '8px',
+                  background: isSpeakingThis ? tokens.colors.semantic.errorMuted : tokens.colors.bg.surface,
+                  border: `1px solid ${isSpeakingThis ? tokens.colors.semantic.error : tokens.colors.border.strong}`,
+                  color: isSpeakingThis ? tokens.colors.semantic.error : tokens.colors.text.primary,
+                  borderRadius: tokens.radii.sm,
                   padding: '8px 16px',
-                  fontSize: '12px',
-                  fontWeight: 700,
+                  fontSize: tokens.typography.sizes.xs,
+                  fontWeight: 600,
                   cursor: 'pointer',
-                  transition: 'all 0.15s ease'
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontFamily: tokens.typography.fontMono
                 }}
               >
-                {isSpeakingThis ? '■ Stop Audio' : '▶ Test Voice Audio'}
+                {isSpeakingThis ? <Icons.Stop size={12} /> : <Icons.Play size={12} />}
+                {isSpeakingThis ? 'STOP AUDIO' : 'TEST VOICE'}
               </button>
             </div>
           </div>
         );
       })()}
 
-      {/* Auto-Speak Behavior Selector */}
-      <div style={{
-        background: 'rgba(15, 23, 42, 0.65)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: '12px',
-        padding: '16px',
-        marginBottom: '20px'
-      }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span>Auto-Speak Responses (Windows Audio Output)</span>
-          <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: settings.autoSpeak === 'ON' ? 'rgba(0, 240, 255, 0.2)' : 'rgba(255, 255, 255, 0.08)', color: settings.autoSpeak === 'ON' ? '#00f0ff' : '#94a3b8', fontWeight: 700 }}>
-            CURRENT: {settings.autoSpeak}
+      {/* Auto-Speak Dispatch Mode */}
+      <div
+        style={{
+          background: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.default}`,
+          borderRadius: tokens.radii.md,
+          padding: '16px',
+          marginBottom: '20px'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary }}>
+            Acoustic Output Dispatch Mode
+          </div>
+          <span
+            style={{
+              fontSize: tokens.typography.sizes.xs,
+              padding: '2px 8px',
+              borderRadius: tokens.radii.xs,
+              background: settings.autoSpeak === 'ON' ? tokens.colors.accent.primarySubtle : tokens.colors.bg.elevated,
+              border: `1px solid ${settings.autoSpeak === 'ON' ? tokens.colors.border.accentSubtle : tokens.colors.border.subtle}`,
+              color: settings.autoSpeak === 'ON' ? tokens.colors.accent.primary : tokens.colors.text.muted,
+              fontFamily: tokens.typography.fontMono,
+              fontWeight: 600
+            }}
+          >
+            ACTIVE: {settings.autoSpeak}
           </span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
@@ -501,19 +695,31 @@ export const VoiceStudio: React.FC = () => {
                 key={opt.mode}
                 onClick={() => handleUpdateSettings({ autoSpeak: opt.mode })}
                 style={{
-                  background: isSelected ? 'rgba(0, 240, 255, 0.12)' : 'rgba(15, 23, 42, 0.5)',
-                  border: `1px solid ${isSelected ? '#00f0ff' : 'rgba(255, 255, 255, 0.08)'}`,
-                  borderRadius: '10px',
+                  background: isSelected ? tokens.colors.bg.elevated : tokens.colors.bg.subtle,
+                  border: `1px solid ${isSelected ? tokens.colors.accent.primary : tokens.colors.border.subtle}`,
+                  borderRadius: tokens.radii.sm,
                   padding: '12px',
                   cursor: 'pointer',
-                  transition: 'all 0.15s ease'
+                  transition: tokens.transitions.fast
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <span style={{ fontSize: '16px' }}>{opt.icon}</span>
-                  <span style={{ fontSize: '13px', fontWeight: 700, color: isSelected ? '#00f0ff' : '#f8fafc' }}>{opt.label}</span>
+                  <span style={{ color: isSelected ? tokens.colors.accent.primary : tokens.colors.text.secondary }}>
+                    {opt.mode === 'OFF' ? <Icons.VolumeOff size={14} /> : opt.mode === 'ON' ? <Icons.Volume size={14} /> : <Icons.Mic size={14} />}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: tokens.typography.sizes.sm,
+                      fontWeight: 600,
+                      color: isSelected ? tokens.colors.accent.primary : tokens.colors.text.primary
+                    }}
+                  >
+                    {opt.label}
+                  </span>
                 </div>
-                <div style={{ fontSize: '11px', color: '#94a3b8', lineHeight: '1.3' }}>{opt.desc}</div>
+                <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, lineHeight: '1.4' }}>
+                  {opt.desc}
+                </div>
               </div>
             );
           })}
@@ -521,25 +727,27 @@ export const VoiceStudio: React.FC = () => {
       </div>
 
       {/* Procedural Audio Cues & State Sounds */}
-      <div style={{
-        background: 'rgba(15, 23, 42, 0.65)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: '12px',
-        padding: '16px',
-        marginBottom: '20px'
-      }}>
+      <div
+        style={{
+          background: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.default}`,
+          borderRadius: tokens.radii.md,
+          padding: '16px',
+          marginBottom: '20px'
+        }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1' }}>
-            Procedural Audio State Cues (100% Offline 16-bit PCM WAV)
+          <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary }}>
+            Procedural Acoustic Cues (Web Audio API & 16-bit PCM WAV)
           </div>
           {cueStatus && (
-            <span style={{ fontSize: '11px', color: '#00f0ff', fontWeight: 600 }}>
+            <span style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
               {cueStatus}
             </span>
           )}
         </div>
-        <div style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '12px' }}>
-          Pure mathematical waveform cues synthesized locally without pre-recorded assets or internet dependencies.
+        <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, marginBottom: '12px' }}>
+          Zero external audio assets. Deterministic mathematical waveforms synthesized in real-time.
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
           {proceduralCues.map(c => {
@@ -549,25 +757,33 @@ export const VoiceStudio: React.FC = () => {
                 key={c.cue}
                 onClick={() => handlePlayCue(c.cue)}
                 style={{
-                  background: isPlayingThis ? `${c.color}25` : 'rgba(15, 23, 42, 0.5)',
-                  border: `1px solid ${isPlayingThis ? c.color : 'rgba(255, 255, 255, 0.08)'}`,
-                  borderRadius: '10px',
+                  background: isPlayingThis ? tokens.colors.accent.primarySubtle : tokens.colors.bg.subtle,
+                  border: `1px solid ${isPlayingThis ? tokens.colors.accent.primary : tokens.colors.border.subtle}`,
+                  borderRadius: tokens.radii.sm,
                   padding: '12px 10px',
                   cursor: 'pointer',
                   textAlign: 'left',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '4px',
-                  transition: 'all 0.15s ease'
+                  transition: tokens.transitions.fast
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '16px' }}>{c.icon}</span>
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: isPlayingThis ? c.color : '#f8fafc' }}>
+                  <span style={{ color: isPlayingThis ? tokens.colors.accent.primary : tokens.colors.text.secondary }}>
+                    <Icons.Volume size={13} />
+                  </span>
+                  <span
+                    style={{
+                      fontSize: tokens.typography.sizes.xs,
+                      fontWeight: 600,
+                      color: isPlayingThis ? tokens.colors.accent.primary : tokens.colors.text.primary
+                    }}
+                  >
                     {c.label}
                   </span>
                 </div>
-                <div style={{ fontSize: '10px', color: '#94a3b8', lineHeight: '1.3' }}>
+                <div style={{ fontSize: '11px', color: tokens.colors.text.muted, lineHeight: '1.3' }}>
                   {c.desc}
                 </div>
               </button>
@@ -576,12 +792,12 @@ export const VoiceStudio: React.FC = () => {
         </div>
       </div>
 
-      {/* Personality Mode Selector */}
+      {/* Personality Mode Presets */}
       <div style={{ marginBottom: '20px' }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '10px' }}>
+        <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary, marginBottom: '10px' }}>
           Active Personality Preset
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
           {personalities.map(p => {
             const isSelected = settings.personalityMode === p.id;
             return (
@@ -589,17 +805,31 @@ export const VoiceStudio: React.FC = () => {
                 key={p.id}
                 onClick={() => handleUpdateSettings({ personalityMode: p.id })}
                 style={{
-                  background: isSelected ? 'rgba(0, 240, 255, 0.12)' : 'rgba(15, 23, 42, 0.65)',
-                  border: `1px solid ${isSelected ? '#00f0ff' : 'rgba(255, 255, 255, 0.08)'}`,
-                  borderRadius: '12px',
+                  background: isSelected ? tokens.colors.bg.elevated : tokens.colors.bg.surface,
+                  border: `1px solid ${isSelected ? tokens.colors.accent.primary : tokens.colors.border.default}`,
+                  borderRadius: tokens.radii.md,
                   padding: '14px',
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease'
+                  transition: tokens.transitions.fast
                 }}
               >
-                <div style={{ fontSize: '20px', marginBottom: '6px' }}>{p.icon}</div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: isSelected ? '#00f0ff' : '#f8fafc' }}>{p.title}</div>
-                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', lineHeight: '1.4' }}>{p.desc}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <span style={{ color: isSelected ? tokens.colors.accent.primary : tokens.colors.text.secondary }}>
+                    <Icons.Personality size={16} />
+                  </span>
+                  <span
+                    style={{
+                      fontSize: tokens.typography.sizes.sm,
+                      fontWeight: 600,
+                      color: isSelected ? tokens.colors.accent.primary : tokens.colors.text.primary
+                    }}
+                  >
+                    {p.title}
+                  </span>
+                </div>
+                <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, lineHeight: '1.4' }}>
+                  {p.desc}
+                </div>
               </div>
             );
           })}
@@ -615,31 +845,37 @@ export const VoiceStudio: React.FC = () => {
         const isElevenLabs = activeProfile?.provider === 'elevenlabs';
 
         return (
-          <div style={{
-            background: 'rgba(15, 23, 42, 0.65)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '12px',
-            padding: '16px',
-            marginBottom: '20px'
-          }}>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Voice Synthesis Parameters (Controls adapt dynamically per provider)</span>
+          <div
+            style={{
+              background: tokens.colors.bg.surface,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.md,
+              padding: '16px',
+              marginBottom: '20px'
+            }}
+          >
+            <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary, marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Acoustic Synthesis Modulation</span>
               {activeProfile && (
-                <span style={{ fontSize: '11px', color: '#94a3b8' }}>
-                  Target Provider: <strong style={{ color: '#00f0ff' }}>{getProviderBadge(activeProfile.provider).label}</strong>
+                <span style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.secondary }}>
+                  Target Provider: <strong style={{ color: tokens.colors.accent.primary }}>{getProviderBadge(activeProfile.provider).label}</strong>
                 </span>
               )}
             </div>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: '16px'
-            }}>
-              {/* Speed - Supported on all */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '16px'
+              }}
+            >
+              {/* Speed */}
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
-                  <span>Speech Speed</span>
-                  <span style={{ fontWeight: 600, color: '#00f0ff' }}>{settings.speechRate.toFixed(2)}x</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.secondary, marginBottom: '6px' }}>
+                  <span>Speech Rate</span>
+                  <span style={{ fontWeight: 600, color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
+                    {settings.speechRate.toFixed(2)}x
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -648,19 +884,21 @@ export const VoiceStudio: React.FC = () => {
                   step="0.05"
                   value={settings.speechRate}
                   onChange={e => handleUpdateSettings({ speechRate: parseFloat(e.target.value) })}
-                  style={{ width: '100%', accentColor: '#00f0ff' }}
+                  style={{ width: '100%', accentColor: tokens.colors.accent.primary }}
                 />
               </div>
 
-              {/* Pitch - Provider specific */}
-              <div style={{ opacity: supportsPitch ? 1 : 0.45 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
+              {/* Pitch */}
+              <div style={{ opacity: supportsPitch ? 1 : 0.4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.secondary, marginBottom: '6px' }}>
                   <span>Pitch</span>
                   {supportsPitch ? (
-                    <span style={{ fontWeight: 600, color: '#8a2be2' }}>{settings.pitch.toFixed(2)}</span>
+                    <span style={{ fontWeight: 600, color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
+                      {settings.pitch.toFixed(2)}
+                    </span>
                   ) : (
-                    <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.2)', border: '1px solid rgba(239, 68, 68, 0.4)', color: '#fca5a5', fontWeight: 700 }}>
-                      NOT SUPPORTED
+                    <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: tokens.radii.xs, background: tokens.colors.bg.elevated, color: tokens.colors.text.muted }}>
+                      UNSUPPORTED
                     </span>
                   )}
                 </div>
@@ -672,15 +910,17 @@ export const VoiceStudio: React.FC = () => {
                   disabled={!supportsPitch}
                   value={settings.pitch}
                   onChange={e => handleUpdateSettings({ pitch: parseFloat(e.target.value) })}
-                  style={{ width: '100%', accentColor: '#8a2be2', cursor: supportsPitch ? 'pointer' : 'not-allowed' }}
+                  style={{ width: '100%', accentColor: tokens.colors.accent.primary, cursor: supportsPitch ? 'pointer' : 'not-allowed' }}
                 />
               </div>
 
-              {/* Output Volume */}
+              {/* Volume */}
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
-                  <span>Output Volume</span>
-                  <span style={{ fontWeight: 600, color: '#10b981' }}>{Math.round(settings.volume * 100)}%</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.secondary, marginBottom: '6px' }}>
+                  <span>Output Amplitude</span>
+                  <span style={{ fontWeight: 600, color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
+                    {Math.round(settings.volume * 100)}%
+                  </span>
                 </div>
                 <input
                   type="range"
@@ -689,18 +929,20 @@ export const VoiceStudio: React.FC = () => {
                   step="0.05"
                   value={settings.volume}
                   onChange={e => handleUpdateSettings({ volume: parseFloat(e.target.value) })}
-                  style={{ width: '100%', accentColor: '#10b981' }}
+                  style={{ width: '100%', accentColor: tokens.colors.accent.primary }}
                 />
               </div>
 
               {/* ElevenLabs Stability */}
-              <div style={{ opacity: isElevenLabs ? 1 : 0.45 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', color: '#cbd5e1', marginBottom: '6px' }}>
+              <div style={{ opacity: isElevenLabs ? 1 : 0.4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.secondary, marginBottom: '6px' }}>
                   <span>Stability (ElevenLabs)</span>
                   {isElevenLabs ? (
-                    <span style={{ fontWeight: 600, color: '#10b981' }}>{((settings as any).stability ?? 0.5).toFixed(2)}</span>
+                    <span style={{ fontWeight: 600, color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
+                      {((settings as any).stability ?? 0.5).toFixed(2)}
+                    </span>
                   ) : (
-                    <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.08)', color: '#94a3b8' }}>
+                    <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: tokens.radii.xs, background: tokens.colors.bg.elevated, color: tokens.colors.text.muted }}>
                       ELEVENLABS ONLY
                     </span>
                   )}
@@ -713,7 +955,7 @@ export const VoiceStudio: React.FC = () => {
                   disabled={!isElevenLabs}
                   value={(settings as any).stability ?? 0.5}
                   onChange={e => handleUpdateSettings({ stability: parseFloat(e.target.value) } as any)}
-                  style={{ width: '100%', accentColor: '#10b981', cursor: isElevenLabs ? 'pointer' : 'not-allowed' }}
+                  style={{ width: '100%', accentColor: tokens.colors.accent.primary, cursor: isElevenLabs ? 'pointer' : 'not-allowed' }}
                 />
               </div>
             </div>
@@ -721,32 +963,34 @@ export const VoiceStudio: React.FC = () => {
         );
       })()}
 
-      {/* Voice Directory & Search */}
-      <div style={{
-        background: 'rgba(15, 23, 42, 0.65)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: '12px',
-        padding: '16px',
-        marginBottom: '14px'
-      }}>
+      {/* Voice Directory & Search Controls */}
+      <div
+        style={{
+          background: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.default}`,
+          borderRadius: tokens.radii.md,
+          padding: '16px',
+          marginBottom: '14px'
+        }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1' }}>
-            Voice Directory ({filteredVoices.length} shown of {voices.length})
+          <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary }}>
+            Voice Catalog Directory ({filteredVoices.length} of {voices.length})
           </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#cbd5e1', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.secondary, cursor: 'pointer' }}>
             <input
               type="checkbox"
               checked={availableOnly}
               onChange={e => setAvailableOnly(e.target.checked)}
-              style={{ accentColor: '#00f0ff' }}
+              style={{ accentColor: tokens.colors.accent.primary }}
             />
             Show Available Only
           </label>
         </div>
 
-        {/* Characteristics Pills */}
+        {/* Characteristics Filter Pills */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', marginBottom: '12px' }}>
-          <span style={{ fontSize: '11px', color: '#94a3b8', marginRight: '4px' }}>Characteristics:</span>
+          <span style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, marginRight: '4px' }}>Filter:</span>
           {['all', 'warm', 'calm', 'deep', 'articulate', 'expressive', 'energetic', 'narrator', 'natural', 'clear', 'confident'].map(char => {
             const isCharActive = char === 'all' ? !characteristicFilter : characteristicFilter === char;
             return (
@@ -754,11 +998,11 @@ export const VoiceStudio: React.FC = () => {
                 key={char}
                 onClick={() => setCharacteristicFilter(char === 'all' ? '' : char === characteristicFilter ? '' : char)}
                 style={{
-                  background: isCharActive ? 'rgba(0, 240, 255, 0.2)' : 'rgba(255, 255, 255, 0.04)',
-                  border: `1px solid ${isCharActive ? '#00f0ff' : 'rgba(255, 255, 255, 0.08)'}`,
-                  borderRadius: '12px',
-                  padding: '2px 8px',
-                  color: isCharActive ? '#00f0ff' : '#cbd5e1',
+                  background: isCharActive ? tokens.colors.accent.primarySubtle : tokens.colors.bg.subtle,
+                  border: `1px solid ${isCharActive ? tokens.colors.border.accent : tokens.colors.border.subtle}`,
+                  borderRadius: tokens.radii.xs,
+                  padding: '3px 8px',
+                  color: isCharActive ? tokens.colors.accent.primary : tokens.colors.text.secondary,
                   fontSize: '11px',
                   cursor: 'pointer',
                   textTransform: 'capitalize'
@@ -770,26 +1014,34 @@ export const VoiceStudio: React.FC = () => {
           })}
         </div>
 
-        {/* Filter Bar */}
+        {/* Filter Controls Row */}
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: '10px', marginBottom: '12px' }}>
           <input
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search by voice name, language, tone, or style..."
+            placeholder="Search by voice name, language, tone..."
             style={{
-              background: 'rgba(15, 23, 42, 0.8)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '6px',
-              padding: '6px 12px',
-              color: '#f8fafc',
-              fontSize: '12px'
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.sm,
+              padding: '7px 12px',
+              color: tokens.colors.text.primary,
+              fontSize: tokens.typography.sizes.xs,
+              outline: 'none'
             }}
           />
           <select
             value={providerFilter}
             onChange={e => setProviderFilter(e.target.value)}
-            style={{ background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#cbd5e1', borderRadius: '6px', padding: '6px 8px', fontSize: '12px' }}
+            style={{
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              color: tokens.colors.text.secondary,
+              borderRadius: tokens.radii.sm,
+              padding: '7px 8px',
+              fontSize: tokens.typography.sizes.xs
+            }}
           >
             <option value="">All Providers ({voices.length})</option>
             <option value="windows-onecore">Windows OneCore (8 Built-in)</option>
@@ -801,7 +1053,14 @@ export const VoiceStudio: React.FC = () => {
           <select
             value={languageFilter}
             onChange={e => setLanguageFilter(e.target.value)}
-            style={{ background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#cbd5e1', borderRadius: '6px', padding: '6px 8px', fontSize: '12px' }}
+            style={{
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              color: tokens.colors.text.secondary,
+              borderRadius: tokens.radii.sm,
+              padding: '7px 8px',
+              fontSize: tokens.typography.sizes.xs
+            }}
           >
             <option value="">All Languages</option>
             <option value="en">English (US/UK/IN)</option>
@@ -815,7 +1074,14 @@ export const VoiceStudio: React.FC = () => {
           <select
             value={naturalnessFilter}
             onChange={e => setNaturalnessFilter(e.target.value)}
-            style={{ background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#cbd5e1', borderRadius: '6px', padding: '6px 8px', fontSize: '12px' }}
+            style={{
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              color: tokens.colors.text.secondary,
+              borderRadius: tokens.radii.sm,
+              padding: '7px 8px',
+              fontSize: tokens.typography.sizes.xs
+            }}
           >
             <option value="">All Naturalness</option>
             <option value="generative">Generative</option>
@@ -826,62 +1092,74 @@ export const VoiceStudio: React.FC = () => {
         </div>
 
         {/* Custom Test Phrase Input */}
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '8px' }}>
           <input
             type="text"
             value={previewText}
             onChange={e => setPreviewText(e.target.value)}
-            placeholder="Test phrase to synthesize..."
+            placeholder="Custom test phrase for synthesis..."
             style={{
               flex: 1,
-              background: 'rgba(15, 23, 42, 0.8)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '6px',
-              padding: '6px 12px',
-              color: '#f8fafc',
-              fontSize: '12px'
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.sm,
+              padding: '7px 12px',
+              color: tokens.colors.text.primary,
+              fontSize: tokens.typography.sizes.xs,
+              outline: 'none'
             }}
           />
           {isPlaying && (
             <button
               onClick={handleStopPlayback}
               style={{
-                background: '#ef4444',
-                border: 'none',
-                color: '#ffffff',
-                borderRadius: '6px',
-                padding: '6px 14px',
-                fontSize: '12px',
-                fontWeight: 700,
-                cursor: 'pointer'
+                background: tokens.colors.semantic.errorMuted,
+                border: `1px solid ${tokens.colors.semantic.error}`,
+                color: tokens.colors.semantic.error,
+                borderRadius: tokens.radii.sm,
+                padding: '7px 14px',
+                fontSize: tokens.typography.sizes.xs,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: tokens.typography.fontMono
               }}
             >
-              Stop Audio
+              STOP AUDIO
             </button>
           )}
         </div>
       </div>
 
       {previewStatus && (
-        <div style={{
-          background: isPlaying ? 'rgba(138, 43, 226, 0.15)' : 'rgba(0, 240, 255, 0.1)',
-          border: `1px solid ${isPlaying ? '#8a2be2' : '#00f0ff'}`,
-          color: isPlaying ? '#c084fc' : '#00f0ff',
-          borderRadius: '8px',
-          padding: '8px 12px',
-          fontSize: '12px',
-          marginBottom: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px'
-        }}>
-          {isPlaying && <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', background: '#c084fc' }} />}
+        <div
+          style={{
+            background: isPlaying ? tokens.colors.accent.primarySubtle : tokens.colors.bg.surface,
+            border: `1px solid ${isPlaying ? tokens.colors.accent.primary : tokens.colors.border.default}`,
+            color: isPlaying ? tokens.colors.accent.primary : tokens.colors.text.secondary,
+            borderRadius: tokens.radii.sm,
+            padding: '8px 14px',
+            fontSize: tokens.typography.sizes.xs,
+            marginBottom: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontFamily: tokens.typography.fontMono
+          }}
+        >
+          {isPlaying && <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: tokens.colors.accent.primary }} />}
           <span>{previewStatus}</span>
         </div>
       )}
 
       {/* Voices Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '12px', marginBottom: '24px' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+          gap: '10px',
+          marginBottom: '24px'
+        }}
+      >
         {filteredVoices.map(v => {
           const isSelected = settings.selectedVoiceId === v.id;
           const isThisVoicePlaying = isPlaying && activeVoicePlaying === v.id;
@@ -892,9 +1170,9 @@ export const VoiceStudio: React.FC = () => {
             <div
               key={v.id}
               style={{
-                background: isSelected ? 'rgba(0, 240, 255, 0.08)' : 'rgba(15, 23, 42, 0.55)',
-                border: `1px solid ${isThisVoicePlaying ? '#8a2be2' : isSelected ? '#00f0ff' : 'rgba(255, 255, 255, 0.06)'}`,
-                borderRadius: '10px',
+                background: isSelected ? tokens.colors.bg.elevated : tokens.colors.bg.surface,
+                border: `1px solid ${isThisVoicePlaying ? tokens.colors.accent.primary : isSelected ? tokens.colors.border.accent : tokens.colors.border.subtle}`,
+                borderRadius: tokens.radii.sm,
                 padding: '12px 14px',
                 display: 'flex',
                 flexDirection: 'column',
@@ -904,43 +1182,51 @@ export const VoiceStudio: React.FC = () => {
             >
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary, display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span>{v.name}</span>
                     {isThisVoicePlaying && (
-                      <span style={{ fontSize: '10px', color: '#c084fc', fontWeight: 700 }}>● SPEAKING</span>
+                      <span style={{ fontSize: '10px', color: tokens.colors.accent.primary, fontWeight: 600, fontFamily: tokens.typography.fontMono }}>
+                        ● SPEAKING
+                      </span>
                     )}
                   </div>
-                  <span style={{
-                    fontSize: '9px',
-                    fontWeight: 700,
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    background: badge.bg,
-                    border: `1px solid ${badge.border}`,
-                    color: badge.color
-                  }}>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      padding: '2px 6px',
+                      borderRadius: tokens.radii.xs,
+                      background: tokens.colors.bg.subtle,
+                      border: `1px solid ${tokens.colors.border.subtle}`,
+                      color: badge.color,
+                      fontFamily: tokens.typography.fontMono
+                    }}
+                  >
                     {badge.label}
                   </span>
                 </div>
 
-                <div style={{ fontSize: '11px', color: '#94a3b8', lineHeight: '1.4' }}>
+                <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, lineHeight: '1.4' }}>
                   {v.language} {v.accent ? `(${v.accent})` : ''} • {v.gender} • {v.naturalness || 'standard'}
                 </div>
                 {v.description && (
-                  <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px', fontStyle: 'italic' }}>
+                  <div style={{ fontSize: '11px', color: tokens.colors.text.faint, marginTop: '2px', fontStyle: 'italic' }}>
                     {v.description}
                   </div>
                 )}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
                   {(v.characteristics || []).slice(0, 4).map(c => (
-                    <span key={c} style={{
-                      fontSize: '9px',
-                      padding: '1px 5px',
-                      borderRadius: '8px',
-                      background: 'rgba(255, 255, 255, 0.05)',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      color: '#94a3b8'
-                    }}>
+                    <span
+                      key={c}
+                      style={{
+                        fontSize: '10px',
+                        padding: '1px 5px',
+                        borderRadius: tokens.radii.xs,
+                        background: tokens.colors.bg.subtle,
+                        border: `1px solid ${tokens.colors.border.subtle}`,
+                        color: tokens.colors.text.muted
+                      }}
+                    >
                       #{c}
                     </span>
                   ))}
@@ -948,16 +1234,15 @@ export const VoiceStudio: React.FC = () => {
               </div>
 
               {/* Status & Action Buttons */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '6px', borderTop: '1px solid rgba(255, 255, 255, 0.04)' }}>
-                {/* Availability status */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '6px', borderTop: `1px solid ${tokens.colors.border.subtle}` }}>
                 <div>
                   {isAvail ? (
-                    <span style={{ fontSize: '10px', color: '#10b981', fontWeight: 600 }}>
+                    <span style={{ fontSize: '11px', color: tokens.colors.semantic.success, fontWeight: 500 }}>
                       ✓ {v.provider.startsWith('windows') ? 'Offline Ready' : 'Available'}
                     </span>
                   ) : (
-                    <span style={{ fontSize: '10px', color: '#eab308', fontWeight: 500 }} title={v.availabilityReason || 'Requires API key'}>
-                      🔒 Needs Key
+                    <span style={{ fontSize: '11px', color: tokens.colors.semantic.warning, fontWeight: 500 }} title={v.availabilityReason || 'Requires API key'}>
+                      Requires Key
                     </span>
                   )}
                 </div>
@@ -967,33 +1252,34 @@ export const VoiceStudio: React.FC = () => {
                     onClick={() => handlePreview(v.id)}
                     disabled={!isAvail && !isThisVoicePlaying}
                     style={{
-                      background: isThisVoicePlaying ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.06)',
-                      border: `1px solid ${isThisVoicePlaying ? '#ef4444' : 'rgba(255, 255, 255, 0.12)'}`,
-                      color: isThisVoicePlaying ? '#ef4444' : isAvail ? '#38bdf8' : '#64748b',
-                      borderRadius: '6px',
+                      background: isThisVoicePlaying ? tokens.colors.semantic.errorMuted : tokens.colors.bg.subtle,
+                      border: `1px solid ${isThisVoicePlaying ? tokens.colors.semantic.error : tokens.colors.border.default}`,
+                      color: isThisVoicePlaying ? tokens.colors.semantic.error : isAvail ? tokens.colors.accent.primary : tokens.colors.text.muted,
+                      borderRadius: tokens.radii.xs,
                       padding: '4px 8px',
                       fontSize: '11px',
-                      fontWeight: isThisVoicePlaying ? 700 : 500,
-                      cursor: isAvail || isThisVoicePlaying ? 'pointer' : 'not-allowed'
+                      fontWeight: 500,
+                      cursor: isAvail || isThisVoicePlaying ? 'pointer' : 'not-allowed',
+                      fontFamily: tokens.typography.fontMono
                     }}
-                    title={isThisVoicePlaying ? 'Stop playback' : isAvail ? 'Test Audio Output on Speakers' : (v.availabilityReason || 'Requires API key')}
                   >
-                    {isThisVoicePlaying ? '■ Stop' : '▶ Test'}
+                    {isThisVoicePlaying ? '■ STOP' : '▶ TEST'}
                   </button>
                   <button
                     onClick={() => handleUpdateSettings({ selectedVoiceId: v.id, selectedProvider: v.provider as any })}
                     style={{
-                      background: isSelected ? '#00f0ff' : 'rgba(255, 255, 255, 0.05)',
-                      border: 'none',
-                      color: isSelected ? '#07090e' : '#cbd5e1',
-                      borderRadius: '6px',
+                      background: isSelected ? tokens.colors.accent.primary : tokens.colors.bg.subtle,
+                      border: `1px solid ${isSelected ? tokens.colors.accent.primary : tokens.colors.border.default}`,
+                      color: isSelected ? tokens.colors.bg.canvas : tokens.colors.text.secondary,
+                      borderRadius: tokens.radii.xs,
                       padding: '4px 8px',
                       fontSize: '11px',
                       fontWeight: 600,
-                      cursor: 'pointer'
+                      cursor: 'pointer',
+                      fontFamily: tokens.typography.fontMono
                     }}
                   >
-                    {isSelected ? 'Active' : 'Select'}
+                    {isSelected ? 'ACTIVE' : 'SELECT'}
                   </button>
                 </div>
               </div>
@@ -1003,112 +1289,127 @@ export const VoiceStudio: React.FC = () => {
       </div>
 
       {/* Windows Native Acoustic Input & Microphone Telemetry */}
-      <div style={{
-        marginTop: '12px',
-        padding: '16px',
-        borderRadius: '12px',
-        background: 'rgba(15, 23, 42, 0.4)',
-        border: '1px solid rgba(255, 255, 255, 0.08)'
-      }}>
+      <div
+        style={{
+          marginTop: '12px',
+          padding: '16px',
+          borderRadius: tokens.radii.md,
+          background: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.default}`
+        }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 700, color: '#f8fafc' }}>
+              <span style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary }}>
                 Windows Native Audio Input
               </span>
-              <span style={{
-                fontSize: '10px',
-                fontWeight: 700,
-                padding: '2px 8px',
-                borderRadius: '10px',
-                backgroundColor: micState === 'MIC_LISTENING' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                color: micState === 'MIC_LISTENING' ? '#ef4444' : '#94a3b8',
-                border: `1px solid ${micState === 'MIC_LISTENING' ? '#ef4444' : 'rgba(255, 255, 255, 0.1)'}`
-              }}>
+              <span
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: tokens.radii.xs,
+                  backgroundColor: micState === 'MIC_LISTENING' ? tokens.colors.accent.primarySubtle : tokens.colors.bg.elevated,
+                  color: micState === 'MIC_LISTENING' ? tokens.colors.accent.primary : tokens.colors.text.muted,
+                  border: `1px solid ${micState === 'MIC_LISTENING' ? tokens.colors.border.accentSubtle : tokens.colors.border.subtle}`,
+                  fontFamily: tokens.typography.fontMono
+                }}
+              >
                 {micState}
               </span>
             </div>
-            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '3px' }}>
-              Real-time 16 kHz 16-bit mono PCM capture via WASAPI / winmm waveIn. 100% local ephemeral memory frames.
+            <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, marginTop: '3px' }}>
+              Real-time 16 kHz 16-bit mono PCM capture via WASAPI / winmm waveIn. Ephemeral RAM ring buffer.
             </div>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               onClick={loadMicData}
               style={{
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                color: '#cbd5e1',
-                borderRadius: '6px',
+                background: tokens.colors.bg.subtle,
+                border: `1px solid ${tokens.colors.border.default}`,
+                color: tokens.colors.text.secondary,
+                borderRadius: tokens.radii.xs,
                 padding: '6px 12px',
-                fontSize: '11px',
+                fontSize: tokens.typography.sizes.xs,
                 cursor: 'pointer'
               }}
             >
-              ↻ Refresh
+              Refresh
             </button>
             <button
               onClick={handleToggleMic}
               disabled={isMicLoading}
               style={{
-                background: micState === 'MIC_LISTENING' ? 'rgba(239, 68, 68, 0.25)' : 'linear-gradient(135deg, #00f0ff, #8a2be2)',
-                border: micState === 'MIC_LISTENING' ? '1px solid #ef4444' : 'none',
-                color: micState === 'MIC_LISTENING' ? '#fca5a5' : '#07090e',
-                borderRadius: '6px',
+                background: micState === 'MIC_LISTENING' ? tokens.colors.semantic.errorMuted : tokens.colors.bg.elevated,
+                border: `1px solid ${micState === 'MIC_LISTENING' ? tokens.colors.semantic.error : tokens.colors.border.strong}`,
+                color: micState === 'MIC_LISTENING' ? tokens.colors.semantic.error : tokens.colors.text.primary,
+                borderRadius: tokens.radii.xs,
                 padding: '6px 14px',
-                fontSize: '11px',
-                fontWeight: 700,
+                fontSize: tokens.typography.sizes.xs,
+                fontWeight: 600,
                 cursor: isMicLoading ? 'not-allowed' : 'pointer',
-                transition: 'all 0.15s ease'
+                fontFamily: tokens.typography.fontMono
               }}
             >
-              {isMicLoading ? 'Updating...' : micState === 'MIC_LISTENING' ? '■ Stop Capture' : '● Start Capture'}
+              {isMicLoading ? 'UPDATING...' : micState === 'MIC_LISTENING' ? '■ STOP CAPTURE' : '● START CAPTURE'}
             </button>
           </div>
         </div>
 
         {/* Acoustic Waveform & Level Meter */}
-        <div style={{
-          marginBottom: '14px',
-          padding: '12px',
-          borderRadius: '8px',
-          background: 'rgba(7, 9, 14, 0.6)',
-          border: '1px solid rgba(255, 255, 255, 0.05)'
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#cbd5e1', marginBottom: '8px' }}>
+        <div
+          style={{
+            marginBottom: '14px',
+            padding: '12px',
+            borderRadius: tokens.radii.sm,
+            background: tokens.colors.bg.subtle,
+            border: `1px solid ${tokens.colors.border.subtle}`
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.secondary, marginBottom: '8px' }}>
             <span>Acoustic Signal Level (RMS Normalizer)</span>
-            <span>{Math.round(micLevel * 100)}% ({micDiagnostics?.currentRms ?? 0} RMS / {micDiagnostics?.peakLevel ?? 0} Peak)</span>
+            <span style={{ fontFamily: tokens.typography.fontMono }}>
+              {Math.round(micLevel * 100)}% ({micDiagnostics?.currentRms ?? 0} RMS / {micDiagnostics?.peakLevel ?? 0} Peak)
+            </span>
           </div>
+
           {/* Level Progress Bar */}
-          <div style={{
-            height: '8px',
-            width: '100%',
-            background: 'rgba(255, 255, 255, 0.08)',
-            borderRadius: '4px',
-            overflow: 'hidden',
-            marginBottom: '10px'
-          }}>
-            <div style={{
-              height: '100%',
-              width: `${Math.min(100, Math.round(micLevel * 100))}%`,
-              background: micLevel > 0.75 ? '#ef4444' : micLevel > 0.35 ? '#10b981' : '#00f0ff',
-              transition: 'width 0.08s ease-out'
-            }} />
+          <div
+            style={{
+              height: '4px',
+              width: '100%',
+              background: tokens.colors.bg.elevated,
+              borderRadius: '2px',
+              overflow: 'hidden',
+              marginBottom: '10px'
+            }}
+          >
+            <div
+              style={{
+                height: '100%',
+                width: `${Math.min(100, Math.round(micLevel * 100))}%`,
+                background: micLevel > 0.75 ? tokens.colors.semantic.warning : tokens.colors.accent.primary,
+                transition: 'width 0.08s ease-out'
+              }}
+            />
           </div>
+
           {/* Live Waveform Bars */}
-          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '3px', height: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '3px', height: '20px' }}>
             {[0.4, 0.7, 1.0, 0.85, 1.2, 0.95, 0.6, 1.1, 0.75, 0.5].map((factor, idx) => {
               const h = micState === 'MIC_LISTENING'
-                ? Math.max(3, Math.min(24, Math.round((micLevel || 0.08) * factor * 24)))
+                ? Math.max(3, Math.min(20, Math.round((micLevel || 0.08) * factor * 20)))
                 : 3;
               return (
                 <div
                   key={idx}
                   style={{
-                    width: '4px',
+                    width: '3px',
                     height: `${h}px`,
-                    backgroundColor: micState === 'MIC_LISTENING' ? '#00f0ff' : 'rgba(255, 255, 255, 0.1)',
-                    borderRadius: '2px',
+                    backgroundColor: micState === 'MIC_LISTENING' ? tokens.colors.accent.primary : tokens.colors.border.default,
+                    borderRadius: '1px',
                     transition: 'height 0.08s ease-out'
                   }}
                 />
@@ -1118,33 +1419,232 @@ export const VoiceStudio: React.FC = () => {
         </div>
 
         {/* Device & Hardware Telemetry Grid */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '10px'
-        }}>
-          <div style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Detected Device</div>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: '10px'
+          }}
+        >
+          <div style={{ padding: '8px 12px', borderRadius: tokens.radii.xs, background: tokens.colors.bg.subtle, border: `1px solid ${tokens.colors.border.subtle}` }}>
+            <div style={{ fontSize: '10px', color: tokens.colors.text.muted }}>Detected Device</div>
+            <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 500, color: tokens.colors.text.primary, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {inputDevices[0]?.name || micDiagnostics?.activeDevice || 'Default Input Device'}
             </div>
           </div>
-          <div style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Format & Rate</div>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#38bdf8' }}>
+          <div style={{ padding: '8px 12px', borderRadius: tokens.radii.xs, background: tokens.colors.bg.subtle, border: `1px solid ${tokens.colors.border.subtle}` }}>
+            <div style={{ fontSize: '10px', color: tokens.colors.text.muted }}>Format & Rate</div>
+            <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 500, color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
               16 kHz Mono (PCM16)
             </div>
           </div>
-          <div style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Frames Received</div>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc' }}>
-              {micDiagnostics?.frameCount ?? 0} frames ({((micDiagnostics?.totalBytes ?? 0) / 1024).toFixed(1)} KB)
+          <div style={{ padding: '8px 12px', borderRadius: tokens.radii.xs, background: tokens.colors.bg.subtle, border: `1px solid ${tokens.colors.border.subtle}` }}>
+            <div style={{ fontSize: '10px', color: tokens.colors.text.muted }}>Frames Received</div>
+            <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 500, color: tokens.colors.text.primary, fontFamily: tokens.typography.fontMono }}>
+              {micDiagnostics?.frameCount ?? 0} ({((micDiagnostics?.totalBytes ?? 0) / 1024).toFixed(1)} KB)
             </div>
           </div>
-          <div style={{ padding: '8px 12px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
-            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Stream Duration</div>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#10b981' }}>
+          <div style={{ padding: '8px 12px', borderRadius: tokens.radii.xs, background: tokens.colors.bg.subtle, border: `1px solid ${tokens.colors.border.subtle}` }}>
+            <div style={{ fontSize: '10px', color: tokens.colors.text.muted }}>Stream Duration</div>
+            <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 500, color: tokens.colors.semantic.success, fontFamily: tokens.typography.fontMono }}>
               {((micDiagnostics?.streamDurationMs ?? 0) / 1000).toFixed(1)}s
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Developer Diagnostics View (Part 5: Production Voice Pipeline Audit & Telemetry) */}
+      <div
+        style={{
+          marginTop: '24px',
+          padding: '20px',
+          borderRadius: tokens.radii.lg,
+          background: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.subtle}`,
+          boxShadow: tokens.shadows.subtle
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '15px' }}>🛠️</span>
+            <div>
+              <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary, letterSpacing: '0.02em' }}>
+                Developer Voice Diagnostics & Pipeline Trace
+              </div>
+              <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted }}>
+                Live audit trail of mic capture, VAD thresholds, online STT, and explicit TTS provider resolution
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '4px 10px',
+                borderRadius: tokens.radii.pill,
+                fontSize: '11px',
+                fontWeight: 600,
+                fontFamily: tokens.typography.fontMono,
+                background: (diagnostics?.ttsFallbackTriggered || ttsFallbackEvent) ? 'rgba(234, 179, 8, 0.15)' : 'rgba(34, 197, 94, 0.15)',
+                color: (diagnostics?.ttsFallbackTriggered || ttsFallbackEvent) ? tokens.colors.semantic.warning : tokens.colors.semantic.success,
+                border: `1px solid ${(diagnostics?.ttsFallbackTriggered || ttsFallbackEvent) ? tokens.colors.semantic.warning : tokens.colors.semantic.success}`
+              }}
+            >
+              <span
+                style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  background: (diagnostics?.ttsFallbackTriggered || ttsFallbackEvent) ? tokens.colors.semantic.warning : tokens.colors.semantic.success
+                }}
+              />
+              {(diagnostics?.ttsFallbackTriggered || ttsFallbackEvent) ? 'FALLBACK TRIGGERED' : 'CLEAN DIRECT PATH'}
+            </span>
+            <button
+              onClick={() => {
+                fetch('/api/v1/voice/diagnostics/last')
+                  .then(r => r.json())
+                  .then(d => { if (d) setDiagnostics(d); })
+                  .catch(() => {});
+              }}
+              style={{
+                padding: '4px 8px',
+                fontSize: '11px',
+                borderRadius: tokens.radii.xs,
+                background: tokens.colors.bg.elevated,
+                border: `1px solid ${tokens.colors.border.subtle}`,
+                color: tokens.colors.text.secondary,
+                cursor: 'pointer'
+              }}
+            >
+              Refresh Trace
+            </button>
+          </div>
+        </div>
+
+        {/* Fallback Warning Banner */}
+        {(diagnostics?.ttsFallbackTriggered || ttsFallbackEvent) && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: tokens.radii.sm,
+              background: 'rgba(234, 179, 8, 0.1)',
+              border: '1px solid rgba(234, 179, 8, 0.3)',
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}
+          >
+            <span style={{ fontSize: '16px' }}>⚠️</span>
+            <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.primary }}>
+              <strong>Silent Fallback Prevented:</strong> Requested voice{' '}
+              <code style={{ color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
+                {ttsFallbackEvent?.originalVoiceId || diagnostics?.ttsVoiceRequested || settings.selectedVoiceId}
+              </code>{' '}
+              failed and fell back to{' '}
+              <code style={{ color: tokens.colors.semantic.warning, fontFamily: tokens.typography.fontMono }}>
+                {ttsFallbackEvent?.fallbackVoiceId || diagnostics?.ttsVoiceResolved || 'windows-onecore'}
+              </code>.
+              {Boolean(ttsFallbackEvent?.reason || diagnostics?.ttsFallbackReason) && (
+                <div style={{ color: tokens.colors.text.muted, marginTop: '2px', fontFamily: tokens.typography.fontMono, fontSize: '11px' }}>
+                  Reason: {ttsFallbackEvent?.reason || diagnostics?.ttsFallbackReason}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Failure Point Banner */}
+        {diagnostics?.failurePoint && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: tokens.radii.sm,
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}
+          >
+            <span style={{ fontSize: '16px' }}>🛑</span>
+            <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.semantic.error }}>
+              <strong>Voice Turn Aborted:</strong> {diagnostics.failurePoint}
+            </div>
+          </div>
+        )}
+
+        {/* Diagnostics Metrics Grid */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '12px'
+          }}
+        >
+          {/* Card 1: Mic & VAD State */}
+          <div style={{ padding: '12px', borderRadius: tokens.radii.sm, background: tokens.colors.bg.subtle, border: `1px solid ${tokens.colors.border.subtle}` }}>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.muted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Mic & VAD State
+            </div>
+            <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary }}>
+              {micState} <span style={{ color: tokens.colors.text.muted, fontWeight: 400 }}>({diagnostics?.vadState || 'IDLE'})</span>
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.secondary, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+              Avg RMS: {diagnostics?.averageRms ?? 0} | Peak: {diagnostics?.maxRms ?? 0}
+            </div>
+          </div>
+
+          {/* Card 2: Active STT Provider */}
+          <div style={{ padding: '12px', borderRadius: tokens.radii.sm, background: tokens.colors.bg.subtle, border: `1px solid ${tokens.colors.border.subtle}` }}>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.muted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Active STT Provider
+            </div>
+            <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
+              {diagnostics?.sttProvider || 'Online STT'}
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.secondary, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+              Status: {diagnostics?.sttConnectionState || 'IDLE'} ({diagnostics?.sttFramesSent ?? 0} frames)
+            </div>
+          </div>
+
+          {/* Card 3: TTS Router & Voice Resolution */}
+          <div style={{ padding: '12px', borderRadius: tokens.radii.sm, background: tokens.colors.bg.subtle, border: `1px solid ${tokens.colors.border.subtle}` }}>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.muted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              TTS Router Resolution
+            </div>
+            <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary }}>
+              {diagnostics?.ttsProviderResolved || settings.selectedProvider || 'auto'}
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.secondary, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+              Voice: {diagnostics?.ttsVoiceResolved || settings.selectedVoiceId}
+            </div>
+          </div>
+
+          {/* Card 4: Last Final Transcript */}
+          <div style={{ gridColumn: 'span 2', padding: '12px', borderRadius: tokens.radii.sm, background: tokens.colors.bg.subtle, border: `1px solid ${tokens.colors.border.subtle}` }}>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.muted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Last Recognized Voice Command
+            </div>
+            <div style={{ fontSize: tokens.typography.sizes.sm, color: diagnostics?.sttFinalTranscript ? tokens.colors.text.primary : tokens.colors.text.muted, fontStyle: diagnostics?.sttFinalTranscript ? 'normal' : 'italic' }}>
+              {diagnostics?.sttFinalTranscript ? `"${diagnostics.sttFinalTranscript}"` : 'No spoken command transcribed in current session'}
+            </div>
+          </div>
+
+          {/* Card 5: Acoustic Latency */}
+          <div style={{ padding: '12px', borderRadius: tokens.radii.sm, background: tokens.colors.bg.subtle, border: `1px solid ${tokens.colors.border.subtle}` }}>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.muted, marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Playback & Latency
+            </div>
+            <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary, fontFamily: tokens.typography.fontMono }}>
+              {diagnostics?.audioOutputLatencyMs ? `${diagnostics.audioOutputLatencyMs} ms` : 'Ready'}
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.secondary, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+              Model: {diagnostics?.modelLatencyMs ? `${diagnostics.modelLatencyMs} ms` : '—'}
             </div>
           </div>
         </div>

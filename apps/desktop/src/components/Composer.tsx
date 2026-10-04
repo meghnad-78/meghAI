@@ -1,7 +1,12 @@
 import React, { useState, useRef } from 'react';
 import type { MicrophoneState, VoiceInputState } from '@meghai/shared-types';
-import { GlassSurface } from './ui/GlassSurface.js';
-import { Button } from './ui/Button.js';
+import {
+  MicIcon,
+  MicOffIcon,
+  SendIcon,
+  CommandIcon,
+  ModelIcon
+} from './ui/Icons.js';
 import { tokens } from '../theme/tokens.js';
 
 interface ComposerProps {
@@ -51,91 +56,85 @@ export const Composer: React.FC<ComposerProps> = ({
     <div
       style={{
         width: '100%',
-        maxWidth: '780px',
+        maxWidth: '820px',
         margin: '0 auto',
         padding: '0 24px 20px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '8px',
+        gap: '6px',
         position: 'relative',
         zIndex: tokens.zIndex.surface
       }}
     >
-      {/* Live Audio Transcript Preview Chip */}
+      {/* Integrated Live Voice Transcription Substrate */}
       {(liveTranscript || voiceInputState === 'COMMAND_CAPTURE' || (voiceInputState as any) === 'COMMAND_LISTENING' || voiceInputState === 'TRANSCRIBING') && (
         <div
           style={{
-            alignSelf: 'center',
+            alignSelf: 'flex-start',
             display: 'inline-flex',
             alignItems: 'center',
             gap: '8px',
-            background: 'rgba(0, 240, 255, 0.08)',
-            border: `1px solid ${tokens.colors.border.accent}`,
-            borderRadius: tokens.radii.pill,
-            padding: '4px 14px',
+            backgroundColor: tokens.colors.bg.elevated,
+            border: `1px solid ${voiceInputState === 'TRANSCRIBING' ? tokens.colors.semantic.warning : tokens.colors.border.accent}`,
+            borderRadius: tokens.radii.sm,
+            padding: '3px 10px',
             fontSize: tokens.typography.sizes.xs,
-            color: tokens.colors.accent.cyan,
-            boxShadow: tokens.shadows.glowCyan,
-            backdropFilter: 'blur(12px)',
-            animation: 'megh-fade-in 0.2s ease-out'
+            color: voiceInputState === 'TRANSCRIBING' ? tokens.colors.semantic.warning : tokens.colors.accent.primary,
+            fontFamily: tokens.typography.fontMono
           }}
         >
           <span
             style={{
-              width: '6px',
-              height: '6px',
+              width: '5px',
+              height: '5px',
               borderRadius: '50%',
-              backgroundColor: tokens.colors.accent.cyan,
-              animation: 'megh-pulse 1.4s infinite'
+              backgroundColor: voiceInputState === 'TRANSCRIBING' ? tokens.colors.semantic.warning : tokens.colors.accent.primary
             }}
           />
-          <span style={{ fontStyle: 'italic' }}>
+          <span>
             {voiceInputState === 'TRANSCRIBING'
-              ? '⚡ Transcribing audio...'
+              ? 'TRANSCRIBING AUDIO STREAM'
               : liveTranscript
-              ? `"${liveTranscript}..."`
-              : '🎙️ Listening... (natural pauses supported up to 2.2s)'}
+              ? `"${liveTranscript}"`
+              : 'CAPTURING SPOKEN COMMAND (NATURAL PAUSE SUPPORTED)'}
           </span>
         </div>
       )}
 
-      {/* Main Composer Box */}
-      <GlassSurface
-        elevation={isFocused ? 'floating' : 'surface'}
-        glow={isFocused}
+      {/* Monolithic Dark Mineral Command Composer */}
+      <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
-          padding: '8px 14px',
-          borderRadius: tokens.radii.xl,
-          border: `1px solid ${isFocused ? tokens.colors.border.accent : tokens.colors.border.default}`,
-          boxShadow: isFocused ? tokens.shadows.glowCyan : tokens.shadows.elevated,
-          transition: tokens.transitions.normal
+          gap: '10px',
+          padding: '6px 12px',
+          backgroundColor: isFocused ? tokens.colors.bg.active : tokens.colors.bg.surface,
+          border: `1px solid ${isFocused ? tokens.colors.border.focus : tokens.colors.border.default}`,
+          borderRadius: tokens.radii.md,
+          transition: tokens.transitions.fast
         }}
       >
-        {/* Model Selector Badge Button */}
+        {/* Model Trigger */}
         <button
           onClick={onOpenModelSelector}
+          title="Select AI Model Provider"
           style={{
-            background: 'rgba(255, 255, 255, 0.04)',
-            border: `1px solid ${tokens.colors.border.subtle}`,
-            borderRadius: tokens.radii.sm,
-            padding: '4px 8px',
             display: 'flex',
             alignItems: 'center',
             gap: '5px',
+            background: tokens.colors.bg.elevated,
+            border: `1px solid ${tokens.colors.border.subtle}`,
+            borderRadius: tokens.radii.xs,
+            padding: '3px 7px',
             color: tokens.colors.text.secondary,
-            fontSize: '11px',
-            fontWeight: 600,
+            fontSize: tokens.typography.sizes.xs,
+            fontFamily: tokens.typography.fontMono,
             cursor: 'pointer',
-            transition: tokens.transitions.fast,
             flexShrink: 0
           }}
-          title="Switch AI model provider"
         >
-          <span style={{ color: tokens.colors.accent.cyan }}>✦</span>
-          <span>{selectedModel.toUpperCase()}</span>
+          <ModelIcon size={12} color={tokens.colors.accent.primary} />
+          <span>{selectedModel.replace('local-', '').toUpperCase()}</span>
         </button>
 
         {/* Input Text Box */}
@@ -148,7 +147,7 @@ export const Composer: React.FC<ComposerProps> = ({
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask MeghAI, save memory, launch apps, daily brief... (Ctrl+Space)"
+          placeholder="Command MeghAI, query memory, execute tools... (Ctrl+Space)"
           style={{
             flex: 1,
             background: 'transparent',
@@ -157,68 +156,78 @@ export const Composer: React.FC<ComposerProps> = ({
             color: tokens.colors.text.primary,
             fontSize: tokens.typography.sizes.sm,
             fontFamily: tokens.typography.fontSans,
-            lineHeight: 1.5
+            lineHeight: 1.4
           }}
         />
 
-        {/* Action Controls: Mic, Command Palette & Send */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {/* Microphone button */}
+        {/* Tactical Actions: Mic, Command Palette & Send */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+          {/* Microphone Capture Button */}
           <button
             onClick={onToggleMic}
             style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              background: isMicListening ? 'rgba(239, 68, 68, 0.2)' : 'rgba(255, 255, 255, 0.04)',
-              border: `1px solid ${isMicListening ? '#EF4444' : tokens.colors.border.default}`,
-              color: isMicListening ? '#FCA5A5' : tokens.colors.text.secondary,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: 'pointer',
-              fontSize: '13px',
-              transform: isMicListening ? `scale(${Math.min(1.25, 1 + micLevel * 0.3)})` : 'scale(1)',
-              transition: tokens.transitions.fast
+              width: '28px',
+              height: '28px',
+              borderRadius: tokens.radii.xs,
+              backgroundColor: isMicListening ? tokens.colors.semantic.errorMuted : tokens.colors.bg.elevated,
+              border: `1px solid ${isMicListening ? tokens.colors.semantic.error : tokens.colors.border.default}`,
+              color: isMicListening ? '#f8b4b0' : tokens.colors.text.secondary,
+              cursor: 'pointer'
             }}
-            title={isMicListening ? `Voice listening (${voiceInputState}). Click to stop.` : 'Voice input. Click to listen.'}
+            title={isMicListening ? `Listening (${voiceInputState}, ${Math.round((micLevel || 0) * 100)}% acoustic level). Click to pause.` : 'Click to start voice input'}
           >
-            {isMicListening ? '🎙️' : '🎤'}
+            {isMicListening ? <MicIcon size={14} /> : <MicOffIcon size={14} />}
           </button>
 
           {/* Quick Command Palette Button */}
           <button
             onClick={onOpenPalette}
             style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: `1px solid ${tokens.colors.border.default}`,
-              color: tokens.colors.text.muted,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: 'pointer',
-              fontSize: '12px'
+              width: '28px',
+              height: '28px',
+              borderRadius: tokens.radii.xs,
+              backgroundColor: tokens.colors.bg.elevated,
+              border: `1px solid ${tokens.colors.border.default}`,
+              color: tokens.colors.text.muted,
+              cursor: 'pointer'
             }}
-            title="Open Universal Command Palette (Ctrl+Space)"
+            title="Open Command Palette (Ctrl+Space)"
           >
-            ⌘
+            <CommandIcon size={13} />
           </button>
 
-          {/* Send Button */}
-          <Button
-            size="sm"
-            variant="primary"
+          {/* Send Execution Button */}
+          <button
             disabled={!value.trim() || disabled}
             onClick={() => onSend(value)}
-            style={{ borderRadius: tokens.radii.pill, padding: '6px 14px' }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '5px',
+              height: '28px',
+              padding: '0 12px',
+              borderRadius: tokens.radii.xs,
+              backgroundColor: value.trim() ? tokens.colors.accent.primary : tokens.colors.bg.elevated,
+              border: `1px solid ${value.trim() ? tokens.colors.accent.primary : tokens.colors.border.default}`,
+              color: value.trim() ? tokens.colors.text.inverse : tokens.colors.text.faint,
+              fontFamily: tokens.typography.fontSans,
+              fontSize: tokens.typography.sizes.xs,
+              fontWeight: 600,
+              cursor: value.trim() && !disabled ? 'pointer' : 'default'
+            }}
           >
-            Send
-          </Button>
+            <span>SEND</span>
+            <SendIcon size={12} />
+          </button>
         </div>
-      </GlassSurface>
+      </div>
     </div>
   );
 };

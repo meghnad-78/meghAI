@@ -20,11 +20,11 @@ export class GoogleCloudSTTProvider implements STTProvider {
   private apiKey?: string;
 
   constructor(apiKey?: string) {
-    this.apiKey = apiKey || process.env['GOOGLE_CLOUD_API_KEY'] || process.env['GEMINI_API_KEY'];
+    this.apiKey = apiKey || process.env['GOOGLE_CLOUD_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GEMINI_API_KEY'];
   }
 
   public isConfigured(): boolean {
-    const key = this.apiKey || process.env['GOOGLE_CLOUD_API_KEY'] || process.env['GEMINI_API_KEY'];
+    const key = this.apiKey || process.env['GOOGLE_CLOUD_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GEMINI_API_KEY'];
     return Boolean(key && key.trim().length > 0);
   }
 
@@ -33,7 +33,7 @@ export class GoogleCloudSTTProvider implements STTProvider {
   }
 
   public async initialize(): Promise<void> {
-    this.apiKey = this.apiKey || process.env['GOOGLE_CLOUD_API_KEY'] || process.env['GEMINI_API_KEY'];
+    this.apiKey = this.apiKey || process.env['GOOGLE_CLOUD_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GEMINI_API_KEY'];
   }
 
   public getLanguages(): string[] {
@@ -90,9 +90,9 @@ export class GoogleCloudSTTProvider implements STTProvider {
   }
 
   public async transcribe(audioBuffer: Buffer, options: STTOptions = {}): Promise<STTResult> {
-    const key = this.apiKey || process.env['GOOGLE_CLOUD_API_KEY'] || process.env['GEMINI_API_KEY'];
+    const key = this.apiKey || process.env['GOOGLE_CLOUD_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GEMINI_API_KEY'];
     if (!key) {
-      throw new Error('NO_CREDENTIALS: Google Cloud STT requires GOOGLE_CLOUD_API_KEY or GEMINI_API_KEY.');
+      throw new Error('NO_CREDENTIALS: Google Cloud STT requires GOOGLE_CLOUD_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY.');
     }
 
     if (!audioBuffer || audioBuffer.length === 0) {
@@ -156,8 +156,9 @@ export class GoogleCloudSTTProvider implements STTProvider {
       }
     }
 
-    // High-fidelity multimodal Gemini 2.5 Flash audio transcription
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
+    // High-fidelity multimodal Gemini 3.5 Flash Lite audio transcription
+    const modelName = 'gemini-3.5-flash-lite';
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${key}`;
     const prompt = `You are a speech-to-text transcriber for the personal AI MeghAI.
 Transcribe the user's speech audio verbatim.
 Rules:
@@ -216,7 +217,7 @@ Rules:
       },
       durationMs: Date.now() - startTime,
       providerId: this.id,
-      modelId: 'gemini-2.5-flash-audio',
+      modelId: 'gemini-3.5-flash-lite-audio',
       isFinal: true
     };
   }

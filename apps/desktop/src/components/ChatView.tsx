@@ -1,6 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { Button } from './ui/Button.js';
-import { Badge } from './ui/Badge.js';
+import { PlayIcon, StopIcon, CheckIcon } from './ui/Icons.js';
 import { tokens } from '../theme/tokens.js';
 
 export interface ChatMessage {
@@ -33,7 +32,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // First-Run / Empty State
+  // First-Run / Elegant Minimal Empty State (Section 59)
   if (messages.length <= 1 && messages[0]?.id === 'welcome') {
     return (
       <div
@@ -43,80 +42,90 @@ export const ChatView: React.FC<ChatViewProps> = ({
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '40px 24px',
-          maxWidth: '720px',
+          padding: '48px 24px 24px',
+          maxWidth: '680px',
           margin: '0 auto',
           textAlign: 'center',
           userSelect: 'none'
         }}
       >
-        <div style={{ fontSize: tokens.typography.sizes.display, fontWeight: 700, color: tokens.colors.text.primary, letterSpacing: '-0.03em' }}>
-          Good to see you.
-        </div>
-        <div style={{ fontSize: tokens.typography.sizes.base, color: tokens.colors.text.secondary, marginTop: '8px', maxWidth: '460px', lineHeight: 1.5 }}>
-          MeghAI Windows Operating Layer is ready. What would you like to explore or automate today?
-        </div>
-
-        {/* Quick Suggestion Cards */}
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, 1fr)',
-            gap: '12px',
+            fontFamily: tokens.typography.fontDisplay,
+            fontSize: tokens.typography.sizes.display,
+            fontWeight: 700,
+            color: tokens.colors.text.primary,
+            letterSpacing: tokens.typography.letterSpacing.display,
+            lineHeight: 1.15
+          }}
+        >
+          MeghAI Operating Environment
+        </div>
+        <p
+          style={{
+            fontFamily: tokens.typography.fontSans,
+            fontSize: tokens.typography.sizes.sm,
+            color: tokens.colors.text.secondary,
+            marginTop: '10px',
+            maxWidth: '480px',
+            lineHeight: 1.6
+          }}
+        >
+          A unified, high-integrity AI computing substrate running natively on Windows.
+          Speak aloud or command below.
+        </p>
+
+        {/* Minimal Contextual Prompts (Non-card, architectural divider layout) */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
             marginTop: '32px',
             width: '100%',
-            maxWidth: '560px'
+            maxWidth: '520px'
           }}
         >
           {[
-            {
-              title: 'Ask or Explain',
-              desc: 'Ask technical questions or summarize documentation',
-              prompt: 'Explain how quantum annealing works compared to gate-based quantum computing.'
-            },
-            {
-              title: 'Voice Activation',
-              desc: 'Say "Hey Megh" or click the microphone to speak',
-              prompt: 'Hey Megh, what is on my schedule today?'
-            },
-            {
-              title: 'Windows System Control',
-              desc: 'Launch applications, execute safe scripts, or check stats',
-              prompt: 'Open Notepad and check system memory usage'
-            },
-            {
-              title: 'Memory & Knowledge',
-              desc: 'Store persistent facts or query knowledge graph',
-              prompt: 'Remember that my preferred programming language is TypeScript'
-            }
-          ].map((item, idx) => (
+            'Explain how quantum annealing differs from gate-based quantum circuits',
+            'Inspect system processes and outline active memory consumption',
+            'Structure a clean, verified TypeScript pipeline for voice data streaming',
+            'Record persistent preference: user requires strictly verified code patterns'
+          ].map((prompt, idx) => (
             <div
               key={idx}
-              onClick={() => onSelectPrompt(item.prompt)}
+              onClick={() => onSelectPrompt(prompt)}
               style={{
-                background: 'rgba(255, 255, 255, 0.025)',
-                border: `1px solid ${tokens.colors.border.default}`,
-                borderRadius: tokens.radii.lg,
-                padding: '14px 18px',
-                textAlign: 'left',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '9px 14px',
+                backgroundColor: tokens.colors.bg.surface,
+                border: `1px solid ${tokens.colors.border.subtle}`,
+                borderRadius: tokens.radii.sm,
                 cursor: 'pointer',
+                textAlign: 'left',
                 transition: tokens.transitions.fast
               }}
-              onMouseEnter={e => {
-                e.currentTarget.style.borderColor = tokens.colors.border.accent;
-                e.currentTarget.style.background = 'rgba(0, 240, 255, 0.04)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.borderColor = tokens.colors.border.default;
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.025)';
-              }}
             >
-              <div style={{ fontWeight: 600, fontSize: tokens.typography.sizes.sm, color: tokens.colors.text.primary }}>
-                {item.title}
-              </div>
-              <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, marginTop: '4px', lineHeight: 1.4 }}>
-                {item.desc}
-              </div>
+              <span
+                style={{
+                  fontFamily: tokens.typography.fontSans,
+                  fontSize: tokens.typography.sizes.xs,
+                  color: tokens.colors.text.secondary
+                }}
+              >
+                {prompt}
+              </span>
+              <span
+                style={{
+                  fontFamily: tokens.typography.fontMono,
+                  fontSize: '10px',
+                  color: tokens.colors.accent.primary
+                }}
+              >
+                RUN
+              </span>
             </div>
           ))}
         </div>
@@ -132,7 +141,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         padding: '24px 32px 16px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '20px',
+        gap: '24px',
         maxWidth: '860px',
         width: '100%',
         margin: '0 auto',
@@ -150,88 +159,124 @@ export const ChatView: React.FC<ChatViewProps> = ({
               display: 'flex',
               flexDirection: 'column',
               alignSelf: isUser ? 'flex-end' : 'flex-start',
-              maxWidth: isUser ? '80%' : '100%',
+              maxWidth: isUser ? '78%' : '100%',
               width: isUser ? 'auto' : '100%'
             }}
           >
             {isUser ? (
-              // Clean, compact user prompt pill
+              // Editorial User Prompt (Quiet, minimal, hairline defined)
               <div
                 style={{
-                  background: 'rgba(255, 255, 255, 0.06)',
+                  backgroundColor: tokens.colors.bg.elevated,
                   border: `1px solid ${tokens.colors.border.default}`,
-                  borderRadius: tokens.radii.xl,
-                  padding: '10px 18px',
+                  borderRadius: tokens.radii.md,
+                  padding: '9px 14px',
                   color: tokens.colors.text.primary,
+                  fontFamily: tokens.typography.fontSans,
                   fontSize: tokens.typography.sizes.sm,
                   lineHeight: 1.5,
-                  backdropFilter: 'blur(12px)',
                   whiteSpace: 'pre-wrap'
                 }}
               >
                 {msg.text}
               </div>
             ) : (
-              // Expansive, editorial assistant message block
+              // Open Editorial Assistant Presentation (High readability, no card containers)
               <div
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '8px',
-                  padding: '8px 0',
+                  padding: '6px 0',
                   color: tokens.colors.text.primary
                 }}
               >
-                {/* Assistant Content */}
+                {/* Assistant Content Body */}
                 <div
                   style={{
+                    fontFamily: tokens.typography.fontSans,
                     fontSize: tokens.typography.sizes.md,
-                    lineHeight: 1.65,
-                    color: '#E2E8F0',
-                    whiteSpace: 'pre-wrap',
-                    fontFamily: tokens.typography.fontSans
+                    lineHeight: 1.68,
+                    color: tokens.colors.text.primary,
+                    whiteSpace: 'pre-wrap'
                   }}
                 >
                   {msg.text}
                 </div>
 
-                {/* Footer Controls: Verification, Listen, Metadata */}
+                {/* Subsystem Metadata & Tactical Audio Bar */}
                 <div
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '10px',
-                    marginTop: '4px'
+                    marginTop: '4px',
+                    paddingTop: '6px',
+                    borderTop: `1px solid ${tokens.colors.border.subtle}`
                   }}
                 >
-                  {/* Verification Status */}
+                  {/* Verification Status Badge */}
                   {msg.verificationStatus && (
-                    <Badge
-                      variant={msg.verificationStatus === 'VERIFIED' ? 'success' : msg.verificationStatus === 'FAILED' ? 'danger' : 'neutral'}
-                      size="sm"
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '10px',
+                        fontFamily: tokens.typography.fontMono,
+                        padding: '1px 6px',
+                        borderRadius: tokens.radii.xs,
+                        backgroundColor: msg.verificationStatus === 'VERIFIED' ? tokens.colors.semantic.successMuted : tokens.colors.bg.elevated,
+                        border: `1px solid ${msg.verificationStatus === 'VERIFIED' ? tokens.colors.semantic.success : tokens.colors.border.default}`,
+                        color: msg.verificationStatus === 'VERIFIED' ? tokens.colors.semantic.success : tokens.colors.text.muted
+                      }}
                     >
-                      {msg.verificationStatus === 'VERIFIED' ? '✓ VERIFIED' : 'UNVERIFIED'}
-                    </Badge>
+                      {msg.verificationStatus === 'VERIFIED' && <CheckIcon size={10} color={tokens.colors.semantic.success} />}
+                      <span>{msg.verificationStatus}</span>
+                    </span>
                   )}
 
                   {msg.verificationDetails && (
-                    <span style={{ fontSize: '11px', color: tokens.colors.text.muted }}>
+                    <span style={{ fontSize: '11px', color: tokens.colors.text.muted, fontFamily: tokens.typography.fontMono }}>
                       {msg.verificationDetails}
+                    </span>
+                  )}
+
+                  {msg.provider && (
+                    <span style={{ fontSize: '10px', color: tokens.colors.text.faint, fontFamily: tokens.typography.fontMono }}>
+                      [{msg.provider.toUpperCase()}]
                     </span>
                   )}
 
                   <div style={{ flex: 1 }} />
 
-                  {/* Audio Listen / Stop button */}
-                  <Button
-                    size="sm"
-                    variant={isSpeaking ? 'danger' : 'ghost'}
+                  {/* Audio Synthesize / Halt Controller */}
+                  <button
                     onClick={() => onSpeakMessage(msg.id, msg.text)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      background: isSpeaking ? tokens.colors.semantic.errorMuted : tokens.colors.bg.elevated,
+                      border: `1px solid ${isSpeaking ? tokens.colors.semantic.error : tokens.colors.border.default}`,
+                      borderRadius: tokens.radii.xs,
+                      padding: '3px 8px',
+                      color: isSpeaking ? '#f8b4b0' : tokens.colors.text.secondary,
+                      fontSize: tokens.typography.sizes.xs,
+                      cursor: 'pointer'
+                    }}
                   >
-                    {isSpeaking ? '■ Stop Audio' : '🔊 Listen'}
-                  </Button>
+                    {isSpeaking ? <StopIcon size={11} /> : <PlayIcon size={11} />}
+                    <span>{isSpeaking ? 'STOP AUDIO' : 'SPEAK'}</span>
+                  </button>
 
-                  <span style={{ fontSize: '11px', color: tokens.colors.text.faint, fontFamily: tokens.typography.fontMono }}>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      color: tokens.colors.text.faint,
+                      fontFamily: tokens.typography.fontMono
+                    }}
+                  >
                     {msg.timestamp}
                   </span>
                 </div>

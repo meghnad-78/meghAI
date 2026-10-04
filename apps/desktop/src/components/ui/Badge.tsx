@@ -20,38 +20,38 @@ export const Badge: React.FC<BadgeProps> = ({
     switch (variant) {
       case 'accent':
         return {
-          background: 'rgba(0, 240, 255, 0.1)',
-          border: '1px solid rgba(0, 240, 255, 0.25)',
-          color: tokens.colors.accent.cyan
+          backgroundColor: tokens.colors.accent.primarySubtle,
+          border: `1px solid ${tokens.colors.border.accent}`,
+          color: tokens.colors.accent.primary
         };
       case 'purple':
         return {
-          background: 'rgba(168, 85, 247, 0.12)',
-          border: '1px solid rgba(168, 85, 247, 0.25)',
-          color: '#D8B4FE'
+          backgroundColor: 'rgba(122, 142, 163, 0.12)',
+          border: '1px solid rgba(122, 142, 163, 0.25)',
+          color: '#d2dce6'
         };
       case 'success':
         return {
-          background: 'rgba(16, 185, 129, 0.12)',
-          border: '1px solid rgba(16, 185, 129, 0.25)',
-          color: '#34D399'
+          backgroundColor: tokens.colors.semantic.successMuted,
+          border: `1px solid ${tokens.colors.semantic.success}`,
+          color: tokens.colors.semantic.success
         };
       case 'warning':
         return {
-          background: 'rgba(245, 158, 11, 0.12)',
-          border: '1px solid rgba(245, 158, 11, 0.25)',
-          color: '#FBBF24'
+          backgroundColor: tokens.colors.semantic.warningMuted,
+          border: `1px solid ${tokens.colors.semantic.warning}`,
+          color: tokens.colors.semantic.warning
         };
       case 'danger':
         return {
-          background: 'rgba(239, 68, 68, 0.12)',
-          border: '1px solid rgba(239, 68, 68, 0.25)',
-          color: '#F87171'
+          backgroundColor: tokens.colors.semantic.errorMuted,
+          border: `1px solid ${tokens.colors.semantic.error}`,
+          color: '#f8b4b0'
         };
       case 'neutral':
       default:
         return {
-          background: 'rgba(255, 255, 255, 0.05)',
+          backgroundColor: 'rgba(255, 255, 255, 0.04)',
           border: `1px solid ${tokens.colors.border.default}`,
           color: tokens.colors.text.secondary
         };
@@ -59,8 +59,14 @@ export const Badge: React.FC<BadgeProps> = ({
   };
 
   const sizeStyles = {
-    sm: { padding: '2px 6px', fontSize: '10.5px', borderRadius: tokens.radii.xs, gap: '4px' },
-    md: { padding: '3px 8px', fontSize: tokens.typography.sizes.xs, borderRadius: tokens.radii.sm, gap: '5px' }
+    sm: {
+      padding: '1px 6px',
+      fontSize: '10px'
+    },
+    md: {
+      padding: '2px 8px',
+      fontSize: '11px'
+    }
   };
 
   return (
@@ -68,17 +74,18 @@ export const Badge: React.FC<BadgeProps> = ({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        fontFamily: tokens.typography.fontSans,
-        fontWeight: 500,
+        gap: '4px',
+        borderRadius: tokens.radii.xs,
+        fontFamily: tokens.typography.fontMono,
+        fontWeight: 600,
+        lineHeight: 1.3,
         letterSpacing: '0.02em',
-        userSelect: 'none',
-        whiteSpace: 'nowrap',
         ...sizeStyles[size],
         ...getVariantStyles(),
         ...style
       }}
     >
-      {icon && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
+      {icon && icon}
       {children}
     </span>
   );

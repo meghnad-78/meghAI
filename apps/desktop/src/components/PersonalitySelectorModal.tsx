@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { PersonalityProfile } from '@meghai/shared-types';
+import { PersonalityIcon, CloseIcon, SearchIcon, CheckIcon } from './ui/Icons.js';
 import { tokens } from '../theme/tokens.js';
 
 interface PersonalitySelectorModalProps {
@@ -66,9 +67,8 @@ export const PersonalitySelectorModal: React.FC<PersonalitySelectorModalProps> =
           display: 'flex',
           flexDirection: 'column',
           backgroundColor: tokens.colors.bg.surface,
-          border: `1px solid ${tokens.colors.border.hover}`,
+          border: `1px solid ${tokens.colors.border.strong}`,
           borderRadius: tokens.radii.lg,
-          boxShadow: tokens.shadows.floating,
           overflow: 'hidden'
         }}
         onClick={e => e.stopPropagation()}
@@ -76,7 +76,7 @@ export const PersonalitySelectorModal: React.FC<PersonalitySelectorModalProps> =
         {/* Header */}
         <div
           style={{
-            padding: '20px 24px',
+            padding: '18px 24px 14px',
             borderBottom: `1px solid ${tokens.colors.border.subtle}`,
             display: 'flex',
             alignItems: 'center',
@@ -85,27 +85,28 @@ export const PersonalitySelectorModal: React.FC<PersonalitySelectorModalProps> =
         >
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '18px' }}>🎭</span>
+              <PersonalityIcon size={16} color={tokens.colors.accent.primary} />
               <h2
                 style={{
                   margin: 0,
+                  fontFamily: tokens.typography.fontDisplay,
                   fontSize: tokens.typography.sizes.lg,
                   fontWeight: 700,
                   color: tokens.colors.text.primary,
                   letterSpacing: '-0.02em'
                 }}
               >
-                AI Personality & Behavioral Persona
+                Behavioral Persona & Cognitive Style
               </h2>
             </div>
             <p
               style={{
-                margin: '4px 0 0',
+                margin: '3px 0 0',
                 fontSize: tokens.typography.sizes.xs,
                 color: tokens.colors.text.muted
               }}
             >
-              Changes assistant tone, response structure, verbosity, and style. Security and permissions remain invariant.
+              Changes tone, structure, verbosity, and AI core animation dynamics. Security and permissions remain invariant.
             </p>
           </div>
 
@@ -115,34 +116,50 @@ export const PersonalitySelectorModal: React.FC<PersonalitySelectorModalProps> =
               background: 'transparent',
               border: 'none',
               color: tokens.colors.text.muted,
-              fontSize: '18px',
               cursor: 'pointer',
               padding: '4px'
             }}
           >
-            ✕
+            <CloseIcon size={16} />
           </button>
         </div>
 
         {/* Search */}
-        <div style={{ padding: '12px 24px', borderBottom: `1px solid ${tokens.colors.border.subtle}` }}>
-          <input
-            type="text"
-            placeholder="Search personalities (e.g. professional, coding, calm)..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+        <div
+          style={{
+            padding: '10px 24px',
+            borderBottom: `1px solid ${tokens.colors.border.subtle}`,
+            backgroundColor: tokens.colors.bg.subtle
+          }}
+        >
+          <div
             style={{
-              width: '100%',
-              padding: '8px 12px',
-              backgroundColor: tokens.colors.bg.elevated,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              backgroundColor: tokens.colors.bg.surface,
               border: `1px solid ${tokens.colors.border.default}`,
-              borderRadius: tokens.radii.sm,
-              color: tokens.colors.text.primary,
-              fontSize: tokens.typography.sizes.sm,
-              outline: 'none',
-              boxSizing: 'border-box'
+              borderRadius: tokens.radii.xs,
+              padding: '6px 10px'
             }}
-          />
+          >
+            <SearchIcon size={14} color={tokens.colors.text.muted} />
+            <input
+              type="text"
+              placeholder="Filter archetypes (e.g. professional, coding, calm)..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                background: 'transparent',
+                border: 'none',
+                color: tokens.colors.text.primary,
+                fontSize: tokens.typography.sizes.sm,
+                fontFamily: tokens.typography.fontSans,
+                outline: 'none'
+              }}
+            />
+          </div>
         </div>
 
         {/* Profiles Grid */}
@@ -151,8 +168,8 @@ export const PersonalitySelectorModal: React.FC<PersonalitySelectorModalProps> =
             padding: '20px 24px',
             overflowY: 'auto',
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))',
-            gap: '12px',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))',
+            gap: '10px',
             flex: 1
           }}
         >
@@ -180,28 +197,28 @@ export const PersonalitySelectorModal: React.FC<PersonalitySelectorModalProps> =
                     });
                 }}
                 style={{
-                  padding: '16px',
-                  borderRadius: tokens.radii.md,
+                  padding: '14px',
+                  borderRadius: tokens.radii.sm,
                   border: `1px solid ${isSelected ? tokens.colors.border.accent : tokens.colors.border.subtle}`,
-                  backgroundColor: isSelected ? 'rgba(0, 240, 255, 0.04)' : tokens.colors.bg.elevated,
+                  backgroundColor: isSelected ? tokens.colors.accent.primarySubtle : tokens.colors.bg.elevated,
                   cursor: 'pointer',
                   transition: tokens.transitions.fast,
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '8px',
-                  boxShadow: isSelected ? tokens.shadows.glowCyan : 'none'
+                  gap: '6px'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 700, fontSize: tokens.typography.sizes.base, color: tokens.colors.text.primary }}>
+                    <span style={{ fontWeight: 600, fontSize: tokens.typography.sizes.base, color: tokens.colors.text.primary }}>
                       {profile.name}
                     </span>
                     <span
                       style={{
-                        fontSize: '10px',
-                        padding: '2px 6px',
-                        borderRadius: tokens.radii.pill,
+                        fontSize: '9px',
+                        fontFamily: tokens.typography.fontMono,
+                        padding: '1px 5px',
+                        borderRadius: tokens.radii.xs,
                         backgroundColor: 'rgba(255, 255, 255, 0.05)',
                         color: tokens.colors.text.secondary,
                         textTransform: 'uppercase'
@@ -212,42 +229,53 @@ export const PersonalitySelectorModal: React.FC<PersonalitySelectorModalProps> =
                   </div>
 
                   {isSelected && (
-                    <span style={{ fontSize: '11px', fontWeight: 600, color: tokens.colors.accent.cyan }}>
-                      ✓ ACTIVE
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontSize: '10px',
+                        fontFamily: tokens.typography.fontMono,
+                        color: tokens.colors.accent.primary
+                      }}
+                    >
+                      <CheckIcon size={11} color={tokens.colors.accent.primary} />
+                      <span>ACTIVE</span>
                     </span>
                   )}
                 </div>
 
-                <p style={{ margin: 0, fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.secondary, lineHeight: 1.4 }}>
+                <p style={{ margin: 0, fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.secondary, lineHeight: 1.45 }}>
                   {profile.description}
                 </p>
 
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
-                  <span style={{ fontSize: '10px', color: tokens.colors.text.muted, backgroundColor: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: tokens.radii.xs }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '2px' }}>
+                  <span style={{ fontSize: '10px', fontFamily: tokens.typography.fontMono, color: tokens.colors.text.muted, backgroundColor: 'rgba(0,0,0,0.3)', padding: '2px 5px', borderRadius: tokens.radii.xs }}>
                     Tone: {profile.tone}
                   </span>
-                  <span style={{ fontSize: '10px', color: tokens.colors.text.muted, backgroundColor: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: tokens.radii.xs }}>
+                  <span style={{ fontSize: '10px', fontFamily: tokens.typography.fontMono, color: tokens.colors.text.muted, backgroundColor: 'rgba(0,0,0,0.3)', padding: '2px 5px', borderRadius: tokens.radii.xs }}>
                     Verbosity: {profile.verbosity}
                   </span>
                   {profile.technicalDepth && (
-                    <span style={{ fontSize: '10px', color: tokens.colors.text.muted, backgroundColor: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: tokens.radii.xs }}>
+                    <span style={{ fontSize: '10px', fontFamily: tokens.typography.fontMono, color: tokens.colors.text.muted, backgroundColor: 'rgba(0,0,0,0.3)', padding: '2px 5px', borderRadius: tokens.radii.xs }}>
                       Tech: {profile.technicalDepth}
                     </span>
                   )}
                 </div>
 
                 {profile.suggestedVoiceCharacteristics && profile.suggestedVoiceCharacteristics.length > 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
-                    <span style={{ fontSize: '10px', color: tokens.colors.text.faint }}>Suggested Voice:</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', marginTop: '2px' }}>
+                    <span style={{ fontSize: '10px', color: tokens.colors.text.faint }}>Suggested:</span>
                     {profile.suggestedVoiceCharacteristics.map((trait, idx) => (
                       <span
                         key={idx}
                         style={{
                           fontSize: '9px',
+                          fontFamily: tokens.typography.fontMono,
                           padding: '1px 5px',
-                          borderRadius: tokens.radii.pill,
-                          backgroundColor: 'rgba(0, 240, 255, 0.08)',
-                          color: tokens.colors.accent.cyan,
+                          borderRadius: tokens.radii.xs,
+                          backgroundColor: tokens.colors.accent.primarySubtle,
+                          color: tokens.colors.accent.primary,
                           border: `1px solid ${tokens.colors.border.accent}`
                         }}
                       >
@@ -266,6 +294,7 @@ export const PersonalitySelectorModal: React.FC<PersonalitySelectorModalProps> =
           style={{
             padding: '12px 24px',
             borderTop: `1px solid ${tokens.colors.border.subtle}`,
+            backgroundColor: tokens.colors.bg.subtle,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -273,14 +302,14 @@ export const PersonalitySelectorModal: React.FC<PersonalitySelectorModalProps> =
             color: tokens.colors.text.muted
           }}
         >
-          <span>12 Built-in Personality Archetypes Available</span>
+          <span style={{ fontFamily: tokens.typography.fontMono }}>12 Archetypes Available</span>
           <button
             onClick={onClose}
             style={{
-              padding: '6px 14px',
-              backgroundColor: 'rgba(255, 255, 255, 0.06)',
+              padding: '4px 12px',
+              backgroundColor: tokens.colors.bg.surface,
               border: `1px solid ${tokens.colors.border.default}`,
-              borderRadius: tokens.radii.sm,
+              borderRadius: tokens.radii.xs,
               color: tokens.colors.text.primary,
               fontSize: tokens.typography.sizes.xs,
               cursor: 'pointer'

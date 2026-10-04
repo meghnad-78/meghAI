@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { TaskEntry } from '@meghai/shared-types';
+import { tokens } from '../theme/tokens.js';
+import { Icons } from './ui/Icons.js';
 
 export const TaskCenter: React.FC = () => {
   const [tasks, setTasks] = useState<TaskEntry[]>([]);
@@ -47,41 +49,95 @@ export const TaskCenter: React.FC = () => {
     return true;
   });
 
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'CRITICAL':
+        return tokens.colors.semantic.error;
+      case 'HIGH':
+        return tokens.colors.semantic.warning;
+      case 'MEDIUM':
+        return tokens.colors.accent.primary;
+      default:
+        return tokens.colors.text.muted;
+    }
+  };
+
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', padding: '24px', overflowY: 'auto' }}>
-      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        padding: '28px 36px',
+        overflowY: 'auto',
+        maxWidth: '1200px',
+        margin: '0 auto',
+        width: '100%',
+        boxSizing: 'border-box'
+      }}
+    >
+      <div
+        style={{
+          marginBottom: '24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          borderBottom: `1px solid ${tokens.colors.border.subtle}`,
+          paddingBottom: '20px'
+        }}
+      >
         <div>
-          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#f8fafc' }}>Tasks & DAG Orchestration</h2>
-          <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
-            Actionable user tasks, multi-step agent plans, and persistent task continuity.
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ color: tokens.colors.accent.primary, display: 'flex', alignItems: 'center' }}>
+              <Icons.Tasks size={22} />
+            </span>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: tokens.typography.sizes.xl,
+                fontWeight: 600,
+                color: tokens.colors.text.primary,
+                letterSpacing: tokens.typography.letterSpacing.tight,
+                fontFamily: tokens.typography.fontDisplay
+              }}
+            >
+              Task Queue & Execution Plan
+            </h2>
+          </div>
+          <p style={{ margin: '6px 0 0', fontSize: tokens.typography.sizes.sm, color: tokens.colors.text.secondary }}>
+            Autonomous agent tasks, step-by-step verified execution plans, and persistent DAG orchestration.
           </p>
         </div>
         <button
           onClick={loadTasks}
           style={{
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.12)',
-            color: '#38bdf8',
-            borderRadius: '8px',
+            background: tokens.colors.bg.surface,
+            border: `1px solid ${tokens.colors.border.default}`,
+            color: tokens.colors.text.secondary,
+            borderRadius: tokens.radii.xs,
             padding: '6px 14px',
             cursor: 'pointer',
-            fontSize: '12px'
+            fontSize: tokens.typography.sizes.xs,
+            fontFamily: tokens.typography.fontMono
           }}
         >
-          ↻ Refresh
+          REFRESH
         </button>
       </div>
 
       {/* Add Task Box */}
-      <div style={{
-        background: 'rgba(15, 23, 42, 0.65)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: '12px',
-        padding: '16px',
-        marginBottom: '20px'
-      }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '10px' }}>
-          + Create New Task
+      <div
+        style={{
+          background: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.default}`,
+          borderRadius: tokens.radii.md,
+          padding: '16px',
+          marginBottom: '20px'
+        }}
+      >
+        <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.text.secondary, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
+          Queue New Execution Task
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           <input
@@ -91,24 +147,25 @@ export const TaskCenter: React.FC = () => {
             onChange={e => setNewTitle(e.target.value)}
             style={{
               flex: 1,
-              background: 'rgba(7, 9, 14, 0.6)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '8px',
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.sm,
               padding: '8px 12px',
-              color: '#f8fafc',
-              fontSize: '13px'
+              color: tokens.colors.text.primary,
+              fontSize: tokens.typography.sizes.sm,
+              outline: 'none'
             }}
           />
           <select
             value={newPriority}
             onChange={e => setNewPriority(e.target.value as any)}
             style={{
-              background: 'rgba(7, 9, 14, 0.6)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '8px',
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.sm,
               padding: '8px 12px',
-              color: '#cbd5e1',
-              fontSize: '13px'
+              color: tokens.colors.text.secondary,
+              fontSize: tokens.typography.sizes.xs
             }}
           >
             <option value="LOW">LOW</option>
@@ -121,68 +178,73 @@ export const TaskCenter: React.FC = () => {
             value={newDueDate}
             onChange={e => setNewDueDate(e.target.value)}
             style={{
-              background: 'rgba(7, 9, 14, 0.6)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '8px',
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.sm,
               padding: '8px 12px',
-              color: '#cbd5e1',
-              fontSize: '13px'
+              color: tokens.colors.text.secondary,
+              fontSize: tokens.typography.sizes.xs
             }}
           />
           <button
             onClick={handleCreateTask}
             style={{
-              background: 'linear-gradient(135deg, #00f0ff, #8a2be2)',
+              background: tokens.colors.accent.primary,
               border: 'none',
-              borderRadius: '8px',
+              borderRadius: tokens.radii.sm,
               padding: '8px 16px',
-              color: '#07090e',
-              fontWeight: 700,
-              fontSize: '12px',
-              cursor: 'pointer'
+              color: tokens.colors.bg.canvas,
+              fontWeight: 600,
+              fontSize: tokens.typography.sizes.xs,
+              cursor: 'pointer',
+              fontFamily: tokens.typography.fontMono
             }}
           >
-            Add Task
+            DISPATCH
           </button>
         </div>
       </div>
 
       {/* Filter Bar */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
-        {['ALL', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED'].map(st => (
-          <button
-            key={st}
-            onClick={() => setStatusFilter(st)}
-            style={{
-              background: statusFilter === st ? 'rgba(0, 240, 255, 0.15)' : 'rgba(255, 255, 255, 0.04)',
-              border: `1px solid ${statusFilter === st ? '#00f0ff' : 'rgba(255, 255, 255, 0.08)'}`,
-              color: statusFilter === st ? '#00f0ff' : '#94a3b8',
-              borderRadius: '6px',
-              padding: '4px 10px',
-              fontSize: '11px',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            {st}
-          </button>
-        ))}
+        {['ALL', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED'].map(st => {
+          const isActive = statusFilter === st;
+          return (
+            <button
+              key={st}
+              onClick={() => setStatusFilter(st)}
+              style={{
+                background: isActive ? tokens.colors.accent.primarySubtle : tokens.colors.bg.subtle,
+                border: `1px solid ${isActive ? tokens.colors.border.accent : tokens.colors.border.subtle}`,
+                color: isActive ? tokens.colors.accent.primary : tokens.colors.text.muted,
+                borderRadius: tokens.radii.xs,
+                padding: '4px 10px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: tokens.typography.fontMono
+              }}
+            >
+              {st}
+            </button>
+          );
+        })}
       </div>
 
       {/* Task List */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {filteredTasks.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#64748b', fontSize: '13px' }}>
-            No tasks found.
+          <div style={{ textAlign: 'center', padding: '40px', color: tokens.colors.text.muted, fontSize: tokens.typography.sizes.sm }}>
+            No tasks queued matching criteria.
           </div>
         ) : (
           filteredTasks.map(task => (
             <div
               key={task.id}
               style={{
-                background: 'rgba(15, 23, 42, 0.55)',
-                border: '1px solid rgba(255, 255, 255, 0.06)',
-                borderRadius: '10px',
+                background: tokens.colors.bg.surface,
+                border: `1px solid ${tokens.colors.border.subtle}`,
+                borderRadius: tokens.radii.sm,
                 padding: '12px 16px',
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -191,28 +253,42 @@ export const TaskCenter: React.FC = () => {
             >
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <span style={{
-                    fontSize: '10px',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    background: task.priority === 'CRITICAL' ? 'rgba(239, 68, 68, 0.2)' : task.priority === 'HIGH' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(56, 189, 248, 0.15)',
-                    color: task.priority === 'CRITICAL' ? '#f87171' : task.priority === 'HIGH' ? '#fbbf24' : '#38bdf8',
-                    fontWeight: 700
-                  }}>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      padding: '2px 6px',
+                      borderRadius: tokens.radii.xs,
+                      background: tokens.colors.bg.subtle,
+                      color: getPriorityColor(task.priority),
+                      fontWeight: 600,
+                      fontFamily: tokens.typography.fontMono
+                    }}
+                  >
                     {task.priority}
                   </span>
-                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(255, 255, 255, 0.06)', color: '#94a3b8' }}>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      padding: '2px 6px',
+                      borderRadius: tokens.radii.xs,
+                      background: tokens.colors.bg.subtle,
+                      color: tokens.colors.text.muted,
+                      fontFamily: tokens.typography.fontMono
+                    }}
+                  >
                     {task.status}
                   </span>
                   {task.dueDate && (
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>Due: {task.dueDate}</span>
+                    <span style={{ fontSize: '11px', color: tokens.colors.text.muted, fontFamily: tokens.typography.fontMono }}>
+                      Due: {task.dueDate}
+                    </span>
                   )}
                 </div>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc' }}>
+                <div style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 500, color: tokens.colors.text.primary }}>
                   {task.title}
                 </div>
               </div>
-              <span style={{ fontSize: '11px', color: '#64748b' }}>
+              <span style={{ fontSize: '11px', color: tokens.colors.text.faint, fontFamily: tokens.typography.fontMono }}>
                 {new Date(task.createdAt).toLocaleDateString()}
               </span>
             </div>

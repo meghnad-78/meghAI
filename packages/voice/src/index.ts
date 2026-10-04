@@ -50,6 +50,7 @@ export {
 } from './audio-preprocessor.js';
 export { AcousticWakeWordDetector, WakeWordDetector, stripWakePhrase } from './wake-word.js';
 export { VoiceInputManager } from './voice-input-manager.js';
+export { VoiceDiagnosticsService, globalVoiceDiagnostics } from './diagnostics.js';
 
 export type {
   VoiceProfile,
@@ -207,29 +208,65 @@ export class PersonalityStudio {
 }
 
 /**
+ * Helper to reliably infer provider from voice ID
+ */
+export function inferVoiceProvider(voiceId: string): VoiceProviderId {
+  const id = (voiceId || '').toLowerCase().trim();
+  if (id.startsWith('eleven-') || id.startsWith('elevenlabs-') || id.startsWith('eleven_')) {
+    return 'elevenlabs';
+  }
+  if (id.startsWith('goog-') || id.startsWith('google-')) {
+    return 'google-cloud';
+  }
+  if (id.startsWith('openai-') || ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].includes(id)) {
+    return 'openai';
+  }
+  if (id.startsWith('sapi-') || id.startsWith('local-')) {
+    return 'windows-sapi';
+  }
+  return 'windows-onecore';
+}
+
+/**
  * Voice Settings & Synthesis Manager with Disk Persistence
  */
 export class VoiceSettingsManager {
   private settings: VoiceSettings;
   private persistencePath?: string;
 
-  constructor(initialSettings?: Partial<VoiceSettings>, persistencePath?: string) {
-    if (persistencePath !== undefined) {
-      this.persistencePath = persistencePath || undefined;
-    } else if (!initialSettings || Object.keys(initialSettings).length === 0) {
+  constructor(initialSettings?: Partial<VoiceSettings> | string, persistencePath?: string) {
+    let resolvedInit: Partial<VoiceSettings> | undefined;
+    let resolvedPath: string | undefined;
+
+    if (typeof initialSettings === 'string') {
+      resolvedPath = initialSettings;
+      resolvedInit = undefined;
+    } else {
+      resolvedInit = initialSettings;
+      resolvedPath = persistencePath;
+    }
+
+    if (resolvedPath !== undefined) {
+      this.persistencePath = resolvedPath || undefined;
+    } else if (!resolvedInit || Object.keys(resolvedInit).length === 0) {
       this.persistencePath = path.join(os.homedir(), '.meghai', 'voice-settings.json');
     }
 
     const persisted = this.loadPersisted();
+    const resolvedVoiceId = resolvedInit?.selectedVoiceId || persisted?.selectedVoiceId || 'onecore-heera';
+    const resolvedProvider = resolvedInit?.selectedProvider ||
+      (resolvedInit?.selectedVoiceId ? inferVoiceProvider(resolvedInit.selectedVoiceId) : undefined) ||
+      persisted?.selectedProvider ||
+      inferVoiceProvider(resolvedVoiceId);
 
     this.settings = {
-      selectedVoiceId: initialSettings?.selectedVoiceId || persisted?.selectedVoiceId || 'onecore-heera',
-      selectedProvider: initialSettings?.selectedProvider || persisted?.selectedProvider || 'windows-onecore',
-      speechRate: initialSettings?.speechRate ?? persisted?.speechRate ?? 1.0,
-      pitch: initialSettings?.pitch ?? persisted?.pitch ?? 1.0,
-      volume: initialSettings?.volume ?? persisted?.volume ?? 1.0,
-      personalityMode: initialSettings?.personalityMode || persisted?.personalityMode || 'FUTURISTIC_COMPANION',
-      autoSpeak: initialSettings?.autoSpeak || persisted?.autoSpeak || 'ON'
+      selectedVoiceId: resolvedVoiceId,
+      selectedProvider: resolvedProvider,
+      speechRate: resolvedInit?.speechRate ?? persisted?.speechRate ?? 1.0,
+      pitch: resolvedInit?.pitch ?? persisted?.pitch ?? 1.0,
+      volume: resolvedInit?.volume ?? persisted?.volume ?? 1.0,
+      personalityMode: resolvedInit?.personalityMode || persisted?.personalityMode || 'FUTURISTIC_COMPANION',
+      autoSpeak: resolvedInit?.autoSpeak || persisted?.autoSpeak || 'ON'
     };
 
     if (this.persistencePath && !persisted) {
@@ -242,9 +279,17 @@ export class VoiceSettingsManager {
   }
 
   public updateSettings(updates: Partial<VoiceSettings>): VoiceSettings {
+    const nextVoiceId = updates.selectedVoiceId || this.settings.selectedVoiceId;
+    let nextProvider = updates.selectedProvider || this.settings.selectedProvider;
+    if (updates.selectedVoiceId && !updates.selectedProvider) {
+      nextProvider = inferVoiceProvider(updates.selectedVoiceId);
+    }
+
     this.settings = {
       ...this.settings,
-      ...updates
+      ...updates,
+      selectedVoiceId: nextVoiceId,
+      selectedProvider: nextProvider
     };
     if (this.persistencePath) {
       this.persist();

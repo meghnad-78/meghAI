@@ -10,6 +10,7 @@ import { AcousticWakeWordDetector, stripWakePhrase } from './wake-word.js';
 import { SpeechRecognitionService } from './stt.js';
 import { AudioCaptureService } from './index.js';
 import { AudioOutputService } from './output-service.js';
+import { globalVoiceDiagnostics } from './diagnostics.js';
 
 export interface VoiceCommandMeta {
   voiceSessionId: string;
@@ -22,8 +23,8 @@ export interface VoiceInputManagerOptions {
   speechRecognition?: SpeechRecognitionService;
   eventBus?: { publish: (type: EventType, payload: any, correlationId?: string) => void };
   onCommand?: (transcript: string, meta?: VoiceCommandMeta) => Promise<void> | void;
-  maxCommandDurationMs?: number; // default: 60000 (60s)
-  silenceThresholdMs?: number;   // default: 2200 (2.2s)
+  maxCommandDurationMs?: number; // default: 25000 (25s)
+  silenceThresholdMs?: number;   // default: 1800 (1.8s)
 }
 
 /**
@@ -58,6 +59,7 @@ export class VoiceInputManager {
   private rollingWakeFrames: AudioFrame[] = [];
   private commandFrames: AudioFrame[] = [];
   private commandStartTime = 0;
+  private lastSpeechTime = 0;
   private commandTimer: NodeJS.Timeout | null = null;
   private silenceCheckTimer: NodeJS.Timeout | null = null;
   private speechDetectedInSession = false;
@@ -74,8 +76,8 @@ export class VoiceInputManager {
     this.speechRecognition = options.speechRecognition || new SpeechRecognitionService();
     this.eventBus = options.eventBus;
     this.commandHandler = options.onCommand;
-    this.maxCommandDurationMs = options.maxCommandDurationMs ?? 60000;
-    this.silenceThresholdMs = options.silenceThresholdMs ?? 2200;
+    this.maxCommandDurationMs = options.maxCommandDurationMs ?? 25000;
+    this.silenceThresholdMs = options.silenceThresholdMs ?? 1800;
 
     // Direct synchronization with AudioOutputService
     if (this.audioOutput && typeof this.audioOutput.onStateChange === 'function') {
@@ -155,7 +157,74 @@ export class VoiceInputManager {
       this.unsubscribeFrame = this.audioCapture.onFrame(frame => this.handleAudioFrame(frame));
     }
 
+    globalVoiceDiagnostics.recordWakeState('LISTENING');
     this.setState('PASSIVE_WAKE_LISTENING', 'Microphone active, listening for wake phrase');
+  }
+
+  /**
+   * Start direct command listening without waiting for wake phrase (e.g. push-to-talk / mic button click).
+   */
+  public async startCommandCapture(reason = 'Manual user command listening'): Promise<void> {
+    if (!this.audioCapture.isCapturing()) {
+      await this.audioCapture.start();
+    }
+
+    if (!this.unsubscribeFrame) {
+      this.unsubscribeFrame = this.audioCapture.onFrame(frame => this.handleAudioFrame(frame));
+    }
+
+    this.currentVoiceSessionId = `vs-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    this.currentCommandId = `cmd-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    this.isTranscribing = false;
+    this.isProcessingCommand = false;
+    this.speechDetectedInSession = false;
+
+    globalVoiceDiagnostics.startTurn(this.currentVoiceSessionId, this.currentCommandId);
+    globalVoiceDiagnostics.recordCommandCaptureState('LISTENING');
+
+    // Retain trailing frames (300ms pre-roll) if any
+    const preRoll = this.rollingWakeFrames.slice(-3);
+    this.commandFrames = [...preRoll];
+    this.rollingWakeFrames = [];
+
+    this.commandStartTime = Date.now();
+    this.lastSpeechTime = 0;
+    this.vad.reset();
+
+    // Play listening cue asynchronously
+    this.audioOutput.playCue('listening').catch(() => {});
+
+    this.setState('COMMAND_CAPTURE', reason);
+    this.eventBus?.publish('WAKE_ACTIVATION_STARTED', {
+      phrase: 'DIRECT_ACTIVATION',
+      confidence: 1.0,
+      voiceSessionId: this.currentVoiceSessionId,
+      commandId: this.currentCommandId
+    });
+
+    if (this.silenceCheckTimer) clearTimeout(this.silenceCheckTimer);
+    this.silenceCheckTimer = setTimeout(() => {
+      if ((this.state === 'COMMAND_CAPTURE' || (this.state as any) === 'COMMAND_LISTENING') && !this.speechDetectedInSession) {
+        if (this.commandFrames.length < 5) {
+          this.setState('PASSIVE_WAKE_LISTENING', 'No speech followed activation');
+          this.eventBus?.publish('VOICE_NO_SPEECH_DETECTED', {
+            voiceSessionId: this.currentVoiceSessionId,
+            commandId: this.currentCommandId,
+            reason: 'No speech followed activation'
+          });
+          globalVoiceDiagnostics.completeTurn(false, 'NO_SPEECH_DETECTED');
+        } else {
+          this.finishCommandCapture('Silence timeout');
+        }
+      }
+    }, 5500);
+
+    if (this.commandTimer) clearTimeout(this.commandTimer);
+    this.commandTimer = setTimeout(() => {
+      if (this.state === 'COMMAND_CAPTURE' || (this.state as any) === 'COMMAND_LISTENING') {
+        this.finishCommandCapture('Max duration timeout');
+      }
+    }, this.maxCommandDurationMs);
   }
 
   /**
@@ -258,6 +327,17 @@ export class VoiceInputManager {
   }
 
   /**
+   * Check whether echo suppression / speaker output gating is active
+   */
+  public isEchoSuppressionActive(): boolean {
+    const isSpeakingNow =
+      this.isSpeaking ||
+      this.state === 'SPEAKING' ||
+      (this.audioOutput && (this.audioOutput.isSpeakingTTS() || this.audioOutput.isPlaying()));
+    return Boolean(isSpeakingNow || Date.now() < this.echoCooldownUntil);
+  }
+
+  /**
    * Flush stale audio buffers that may contain speaker output or stale room sound
    */
   public flushStaleAudio(): void {
@@ -332,12 +412,28 @@ export class VoiceInputManager {
     } else if (this.state === 'COMMAND_CAPTURE' || (this.state as any) === 'COMMAND_LISTENING') {
       // IN COMMAND LISTENING: NEVER DROP INCOMING AUDIO FRAMES
       this.commandFrames.push(frame);
+      globalVoiceDiagnostics.recordMicFrame(frame);
 
-      // Periodically trigger partial transcript preview every 2.5s
+      if (vadResult.isSpeech) {
+        this.lastSpeechTime = now;
+        this.speechDetectedInSession = true;
+        if (this.silenceCheckTimer) {
+          clearTimeout(this.silenceCheckTimer);
+          this.silenceCheckTimer = null;
+        }
+      } else if (this.speechDetectedInSession && this.lastSpeechTime > 0) {
+        // Speech was detected, now user has been silent for at least silenceThresholdMs
+        if (now - this.lastSpeechTime >= this.silenceThresholdMs) {
+          this.finishCommandCapture('Post-speech silence threshold reached');
+          return;
+        }
+      }
+
+      // Periodically trigger partial transcript preview every 2.0s
       if (
-        now - this.lastPartialTranscriptTime >= 2500 &&
+        now - this.lastPartialTranscriptTime >= 2000 &&
         !this.isProcessingPartial &&
-        this.commandFrames.length >= 15
+        this.commandFrames.length >= 10
       ) {
         this.lastPartialTranscriptTime = now;
         this.triggerPartialTranscript().catch(() => {});
@@ -354,7 +450,7 @@ export class VoiceInputManager {
    * Periodic partial transcription preview for live UI feedback
    */
   private async triggerPartialTranscript(): Promise<void> {
-    if (this.isProcessingPartial || this.commandFrames.length < 15) return;
+    if (this.isProcessingPartial || this.commandFrames.length < 10) return;
     this.isProcessingPartial = true;
     try {
       const pcmBuffer = Buffer.concat(this.commandFrames.map(f => f.data));
@@ -364,6 +460,7 @@ export class VoiceInputManager {
         const stripped = stripWakePhrase(text);
         const clean = (stripped.cleaned || text).trim();
         if (clean) {
+          globalVoiceDiagnostics.recordSttPartial(clean);
           this.emitPartialTranscript(clean);
         }
       }
@@ -442,6 +539,10 @@ export class VoiceInputManager {
     this.isProcessingCommand = false;
     this.speechDetectedInSession = false;
 
+    globalVoiceDiagnostics.startTurn(this.currentVoiceSessionId, this.currentCommandId);
+    globalVoiceDiagnostics.recordWakeState(res.phrase || 'WAKE_DETECTED');
+    globalVoiceDiagnostics.recordCommandCaptureState('LISTENING');
+
     // Retain trailing frames (300ms pre-roll) so words immediately following wake are not clipped
     const preRoll = this.rollingWakeFrames.slice(-3);
     this.commandFrames = [...preRoll];
@@ -461,6 +562,7 @@ export class VoiceInputManager {
 
     // Transition directly into command capture / listening
     this.commandStartTime = Date.now();
+    this.lastSpeechTime = 0;
     this.vad.reset();
     this.setState('COMMAND_CAPTURE', 'Listening for user command');
 
@@ -470,6 +572,12 @@ export class VoiceInputManager {
       if ((this.state === 'COMMAND_CAPTURE' || (this.state as any) === 'COMMAND_LISTENING') && !this.speechDetectedInSession) {
         if (this.commandFrames.length < 5) {
           this.setState('PASSIVE_WAKE_LISTENING', 'No speech followed wake activation');
+          this.eventBus?.publish('VOICE_NO_SPEECH_DETECTED', {
+            voiceSessionId: this.currentVoiceSessionId,
+            commandId: this.currentCommandId,
+            reason: 'No speech followed wake activation'
+          });
+          globalVoiceDiagnostics.completeTurn(false, 'NO_SPEECH_DETECTED');
         } else {
           this.finishCommandCapture('Silence timeout');
         }
@@ -523,9 +631,18 @@ export class VoiceInputManager {
       this.silenceCheckTimer = null;
     }
 
+    const voiceSessionId = this.currentVoiceSessionId || `vs-${Date.now()}`;
+    const commandId = this.currentCommandId || `cmd-${Date.now()}`;
+
     if (this.commandFrames.length < 3) {
       // Audio too short (<300ms), return to passive listening
       this.isTranscribing = false;
+      this.eventBus?.publish('VOICE_NO_SPEECH_DETECTED', {
+        voiceSessionId,
+        commandId,
+        reason: 'Command audio too short'
+      });
+      globalVoiceDiagnostics.completeTurn(false, 'COMMAND_AUDIO_TOO_SHORT');
       this.setState('PASSIVE_WAKE_LISTENING', 'Command audio too short');
       return;
     }
@@ -533,10 +650,18 @@ export class VoiceInputManager {
     const commandAudioPcm = Buffer.concat(this.commandFrames.map(f => f.data));
     this.commandFrames = [];
 
-    const voiceSessionId = this.currentVoiceSessionId || `vs-${Date.now()}`;
-    const commandId = this.currentCommandId || `cmd-${Date.now()}`;
-
     this.setState('TRANSCRIBING', reason);
+    globalVoiceDiagnostics.recordCommandCaptureState('TRANSCRIBING');
+    const activeProvider = (typeof (this.speechRecognition as any).getRouter === 'function')
+      ? (this.speechRecognition as any).getRouter().listProviders?.().find((p: any) => typeof p.isConfigured === 'function' ? p.isConfigured() : true)?.id || 'online'
+      : 'online';
+    globalVoiceDiagnostics.recordSttConnection(
+      activeProvider,
+      'realtime',
+      'CONNECTING'
+    );
+    globalVoiceDiagnostics.recordSttFrameSent(commandAudioPcm.length);
+
     this.eventBus?.publish('VOICE_TRANSCRIBING', {
       voiceSessionId,
       commandId,
@@ -567,6 +692,8 @@ export class VoiceInputManager {
           if (first) this.processedCommandHashes.delete(first);
         }
 
+        globalVoiceDiagnostics.recordSttFinal(cleanCommandText, result.providerId, result.modelId);
+
         this.eventBus?.publish('TRANSCRIPT_FINAL', {
           voiceSessionId,
           commandId,
@@ -589,6 +716,12 @@ export class VoiceInputManager {
         }
       } else {
         // No discernible command text recognized
+        this.eventBus?.publish('VOICE_NO_SPEECH_DETECTED', {
+          voiceSessionId,
+          commandId,
+          reason: 'No speech recognized'
+        });
+        globalVoiceDiagnostics.completeTurn(false, 'NO_SPEECH_DETECTED');
         this.setState('PASSIVE_WAKE_LISTENING', 'No speech recognized, resumed passive listening');
       }
     } catch (err: any) {
@@ -597,6 +730,7 @@ export class VoiceInputManager {
         commandId,
         error: err.message
       });
+      globalVoiceDiagnostics.completeTurn(false, `STT_ERROR: ${err.message}`);
       this.setState('PASSIVE_WAKE_LISTENING', `Transcription error: ${err.message}`);
     } finally {
       this.isTranscribing = false;

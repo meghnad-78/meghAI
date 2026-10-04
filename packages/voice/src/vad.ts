@@ -1,11 +1,12 @@
 import type { AudioFrame, VADState, VADFrameResult, EventType } from '@meghai/shared-types';
+import { globalVoiceDiagnostics } from './diagnostics.js';
 
 export interface VADOptions {
-  minSpeechRms?: number;         // Minimum RMS to count as speech (default: 300)
+  minSpeechRms?: number;         // Minimum RMS to count as speech (default: 150)
   speechLeadFrames?: number;     // Consecutive frames needed to trigger speech start (default: 2 = 200ms)
-  silenceTimeoutMs?: number;     // Silence duration to trigger speech end (default: 900ms)
+  silenceTimeoutMs?: number;     // Silence duration to trigger speech end (default: 1800ms)
   noiseFloorAlpha?: number;      // Exponential smoothing factor for noise floor (default: 0.05)
-  thresholdMultiplier?: number;  // Multiplier over noise floor (default: 2.5)
+  thresholdMultiplier?: number;  // Multiplier over noise floor (default: 2.2)
   onSpeechStart?: () => void;
   onSpeechEnd?: (durationMs: number) => void;
   eventBus?: { publish: (type: EventType, payload: any, correlationId?: string) => void };
@@ -35,11 +36,11 @@ export class VoiceActivityDetector {
   private readonly eventBus?: { publish: (type: EventType, payload: any, correlationId?: string) => void };
 
   constructor(options: VADOptions = {}) {
-    this.minSpeechRms = options.minSpeechRms ?? 300;
+    this.minSpeechRms = options.minSpeechRms ?? 150;
     this.speechLeadFrames = options.speechLeadFrames ?? 2;
-    this.silenceTimeoutMs = options.silenceTimeoutMs ?? 2200;
+    this.silenceTimeoutMs = options.silenceTimeoutMs ?? 1800;
     this.noiseFloorAlpha = options.noiseFloorAlpha ?? 0.05;
-    this.thresholdMultiplier = options.thresholdMultiplier ?? 2.5;
+    this.thresholdMultiplier = options.thresholdMultiplier ?? 2.2;
     this.onSpeechStart = options.onSpeechStart;
     this.onSpeechEnd = options.onSpeechEnd;
     this.eventBus = options.eventBus;
@@ -71,15 +72,17 @@ export class VoiceActivityDetector {
 
     if (isFrameSpeech) {
       this.consecutiveSpeechFrames++;
-      this.consecutiveSilenceFrames = 0;
-      this.silenceDurationMs = 0;
 
       if (this.state === 'SILENCE') {
+        this.consecutiveSilenceFrames = 0;
+        this.silenceDurationMs = 0;
+
         if (this.consecutiveSpeechFrames >= this.speechLeadFrames) {
           this.state = 'SPEECH';
           this.speechStartTime = frame.timestamp;
           this.speechDurationMs = this.consecutiveSpeechFrames * frame.durationMs;
 
+          globalVoiceDiagnostics.recordVadState('SPEECH', frameRms);
           this.onSpeechStart?.();
           this.eventBus?.publish('VAD_SPEECH_STARTED', {
             rms: frameRms,
@@ -89,17 +92,28 @@ export class VoiceActivityDetector {
         }
       } else {
         // Already in SPEECH
+        // Debounce: If we had accumulated substantial silence (>500ms), a single isolated
+        // transient spike should not completely erase the accumulated silence window
+        if (this.consecutiveSilenceFrames > 5 && this.consecutiveSpeechFrames < 2) {
+          // Treat as transient acoustic blip: decay silence duration slightly rather than resetting to 0
+          this.silenceDurationMs = Math.max(0, this.silenceDurationMs - frame.durationMs);
+        } else {
+          this.consecutiveSilenceFrames = 0;
+          this.silenceDurationMs = 0;
+        }
         this.speechDurationMs += frame.durationMs;
+        globalVoiceDiagnostics.recordVadState('SPEECH', frameRms);
       }
     } else {
       // Silence frame
       this.consecutiveSilenceFrames++;
       this.consecutiveSpeechFrames = 0;
-      this.silenceDurationMs = this.consecutiveSilenceFrames * frame.durationMs;
+      this.silenceDurationMs += frame.durationMs;
 
       if (this.state === 'SILENCE') {
         // Track ambient room noise floor slowly during silence
         this.noiseFloor = this.noiseFloor * (1 - this.noiseFloorAlpha) + frameRms * this.noiseFloorAlpha;
+        globalVoiceDiagnostics.recordVadState('SILENCE', frameRms);
       } else {
         // In SPEECH, check if silence exceeds timeout
         this.speechDurationMs += frame.durationMs;
@@ -108,6 +122,7 @@ export class VoiceActivityDetector {
           this.state = 'SILENCE';
           const finalDuration = Math.max(0, this.speechDurationMs - this.silenceDurationMs);
 
+          globalVoiceDiagnostics.recordVadState('SILENCE', frameRms);
           this.onSpeechEnd?.(finalDuration);
           this.eventBus?.publish('VAD_SPEECH_ENDED', {
             speechDurationMs: finalDuration,
@@ -116,6 +131,8 @@ export class VoiceActivityDetector {
 
           this.speechDurationMs = 0;
           this.speechStartTime = 0;
+          this.consecutiveSilenceFrames = 0;
+          this.silenceDurationMs = 0;
         }
       }
     }

@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { GlassSurface } from './ui/GlassSurface.js';
-import { Button } from './ui/Button.js';
-import { Badge } from './ui/Badge.js';
+import { VoiceIcon, PlayIcon, StopIcon, CloseIcon, SearchIcon } from './ui/Icons.js';
 import { tokens } from '../theme/tokens.js';
 
 interface VoiceItem {
@@ -56,7 +54,7 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
       await fetch('/api/v1/voice/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ voiceId, text: 'Hello! I am MeghAI, your personal operating assistant.' })
+        body: JSON.stringify({ voiceId, text: 'Greetings. I am MeghAI, your personal intelligence layer.' })
       });
     } catch {} finally {
       setPreviewingId(null);
@@ -82,29 +80,31 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(4, 6, 10, 0.78)',
+        backgroundColor: tokens.colors.bg.overlay,
         backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
         padding: '24px'
       }}
       onClick={onClose}
     >
-      <GlassSurface
-        elevation="floating"
+      <div
         style={{
           width: '100%',
-          maxWidth: '580px',
+          maxWidth: '600px',
           maxHeight: '85vh',
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'hidden',
-          borderRadius: tokens.radii.xl
+          backgroundColor: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.strong}`,
+          borderRadius: tokens.radii.lg,
+          overflow: 'hidden'
         }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div
           style={{
-            padding: '20px 24px 16px',
+            padding: '18px 24px 14px',
             borderBottom: `1px solid ${tokens.colors.border.subtle}`,
             display: 'flex',
             alignItems: 'center',
@@ -112,11 +112,22 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
           }}
         >
           <div>
-            <div style={{ fontSize: tokens.typography.sizes.lg, fontWeight: 700, color: tokens.colors.text.primary }}>
-              Select Voice Persona
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <VoiceIcon size={16} color={tokens.colors.accent.primary} />
+              <span
+                style={{
+                  fontFamily: tokens.typography.fontDisplay,
+                  fontSize: tokens.typography.sizes.lg,
+                  fontWeight: 700,
+                  letterSpacing: '-0.02em',
+                  color: tokens.colors.text.primary
+                }}
+              >
+                Voice Profile Directory
+              </span>
             </div>
             <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, marginTop: '2px' }}>
-              Choose native Windows or neural cloud voice synthesis
+              Native Windows offline speech or neural cloud synthesis
             </div>
           </div>
           <button
@@ -125,39 +136,58 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
               background: 'transparent',
               border: 'none',
               color: tokens.colors.text.muted,
-              fontSize: '18px',
               cursor: 'pointer',
-              padding: '4px 8px',
-              borderRadius: tokens.radii.sm
+              padding: '4px'
             }}
           >
-            ✕
+            <CloseIcon size={16} />
           </button>
         </div>
 
         {/* Filter & Search Bar */}
-        <div style={{ padding: '12px 24px', borderBottom: `1px solid ${tokens.colors.border.subtle}`, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <input
-            type="text"
-            placeholder="Search voices, characteristics, languages (e.g. Heera, Hindi, calm, warm)..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+        <div
+          style={{
+            padding: '12px 24px',
+            borderBottom: `1px solid ${tokens.colors.border.subtle}`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+            backgroundColor: tokens.colors.bg.subtle
+          }}
+        >
+          <div
             style={{
-              background: 'rgba(255, 255, 255, 0.04)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              backgroundColor: tokens.colors.bg.surface,
               border: `1px solid ${tokens.colors.border.default}`,
-              borderRadius: tokens.radii.md,
-              padding: '8px 12px',
-              color: tokens.colors.text.primary,
-              fontSize: tokens.typography.sizes.sm,
-              outline: 'none',
-              fontFamily: 'inherit'
+              borderRadius: tokens.radii.xs,
+              padding: '6px 10px'
             }}
-          />
+          >
+            <SearchIcon size={14} color={tokens.colors.text.muted} />
+            <input
+              type="text"
+              placeholder="Filter by name, characteristics, language (e.g. Heera, calm, Hindi)..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: 'none',
+                color: tokens.colors.text.primary,
+                fontSize: tokens.typography.sizes.sm,
+                fontFamily: tokens.typography.fontSans,
+                outline: 'none'
+              }}
+            />
+          </div>
 
-          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
+          <div style={{ display: 'flex', gap: '5px', overflowX: 'auto', paddingBottom: '2px' }}>
             {[
               { id: 'all', label: 'All Providers' },
-              { id: 'windows-onecore', label: 'OneCore (WinRT)' },
+              { id: 'windows-onecore', label: 'OneCore' },
               { id: 'windows-sapi', label: 'SAPI' },
               { id: 'google-cloud', label: 'Google Cloud' },
               { id: 'elevenlabs', label: 'ElevenLabs' },
@@ -167,12 +197,13 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
                 key={tab.id}
                 onClick={() => setSelectedProvider(tab.id)}
                 style={{
-                  background: selectedProvider === tab.id ? tokens.colors.accent.cyanMuted : 'rgba(255, 255, 255, 0.03)',
+                  background: selectedProvider === tab.id ? tokens.colors.accent.primarySubtle : tokens.colors.bg.surface,
                   border: `1px solid ${selectedProvider === tab.id ? tokens.colors.border.accent : tokens.colors.border.subtle}`,
-                  borderRadius: tokens.radii.sm,
-                  padding: '4px 10px',
-                  color: selectedProvider === tab.id ? tokens.colors.accent.cyan : tokens.colors.text.secondary,
+                  borderRadius: tokens.radii.xs,
+                  padding: '3px 9px',
+                  color: selectedProvider === tab.id ? tokens.colors.accent.primary : tokens.colors.text.secondary,
                   fontSize: tokens.typography.sizes.xs,
+                  fontFamily: tokens.typography.fontMono,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap'
                 }}
@@ -202,66 +233,103 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: '10px 14px',
-                  borderRadius: tokens.radii.md,
+                  borderRadius: tokens.radii.sm,
                   border: `1px solid ${isSelected ? tokens.colors.border.accent : tokens.colors.border.subtle}`,
-                  background: isSelected
-                    ? 'rgba(0, 240, 255, 0.08)'
-                    : v.available
-                    ? 'rgba(255, 255, 255, 0.02)'
-                    : 'rgba(255, 255, 255, 0.005)',
+                  backgroundColor: isSelected ? tokens.colors.accent.primarySubtle : tokens.colors.bg.elevated,
                   cursor: v.available ? 'pointer' : 'default',
                   opacity: v.available ? 1 : 0.45,
                   transition: tokens.transitions.fast
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontWeight: 600, fontSize: tokens.typography.sizes.sm, color: isSelected ? tokens.colors.accent.cyan : tokens.colors.text.primary }}>
-                        {v.name}
-                      </span>
-                      {isSelected && <Badge variant="accent" size="sm">ACTIVE</Badge>}
-                      <Badge variant="neutral" size="sm">{v.provider.replace('windows-', '')}</Badge>
-                    </div>
-                    <span style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted }}>
-                      {v.language} {v.accent ? `• ${v.accent}` : ''} • {v.naturalness}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span
+                      style={{
+                        fontWeight: 600,
+                        fontSize: tokens.typography.sizes.sm,
+                        color: isSelected ? tokens.colors.accent.primary : tokens.colors.text.primary
+                      }}
+                    >
+                      {v.name}
                     </span>
-                    {v.characteristics && v.characteristics.length > 0 && (
-                      <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '3px' }}>
-                        {v.characteristics.slice(0, 3).map((ch, i) => (
-                          <span
-                            key={i}
-                            style={{
-                              fontSize: '9px',
-                              padding: '1px 5px',
-                              borderRadius: tokens.radii.pill,
-                              background: 'rgba(255, 255, 255, 0.05)',
-                              color: tokens.colors.text.muted,
-                              border: `1px solid ${tokens.colors.border.subtle}`
-                            }}
-                          >
-                            {ch}
-                          </span>
-                        ))}
-                      </div>
+                    {isSelected && (
+                      <span
+                        style={{
+                          fontSize: '9px',
+                          fontFamily: tokens.typography.fontMono,
+                          padding: '1px 5px',
+                          borderRadius: tokens.radii.xs,
+                          backgroundColor: tokens.colors.accent.primaryMuted,
+                          color: tokens.colors.accent.primary,
+                          border: `1px solid ${tokens.colors.border.accent}`
+                        }}
+                      >
+                        ACTIVE
+                      </span>
                     )}
+                    <span
+                      style={{
+                        fontSize: '9px',
+                        fontFamily: tokens.typography.fontMono,
+                        padding: '1px 5px',
+                        borderRadius: tokens.radii.xs,
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                        color: tokens.colors.text.muted,
+                        border: `1px solid ${tokens.colors.border.subtle}`
+                      }}
+                    >
+                      {v.provider.replace('windows-', '').toUpperCase()}
+                    </span>
                   </div>
+                  <span style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted }}>
+                    {v.language} {v.accent ? `• ${v.accent}` : ''} • {v.naturalness}
+                  </span>
+                  {v.characteristics && v.characteristics.length > 0 && (
+                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '2px' }}>
+                      {v.characteristics.slice(0, 3).map((ch, i) => (
+                        <span
+                          key={i}
+                          style={{
+                            fontSize: '9px',
+                            fontFamily: tokens.typography.fontMono,
+                            padding: '1px 5px',
+                            borderRadius: tokens.radii.xs,
+                            background: 'rgba(255, 255, 255, 0.04)',
+                            color: tokens.colors.text.secondary,
+                            border: `1px solid ${tokens.colors.border.subtle}`
+                          }}
+                        >
+                          {ch}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {v.available && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={(e) => handlePreview(v.id, e)}
-                      loading={previewingId === v.id}
+                    <button
+                      onClick={e => handlePreview(v.id, e)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: 'transparent',
+                        border: `1px solid ${tokens.colors.border.default}`,
+                        borderRadius: tokens.radii.xs,
+                        padding: '3px 8px',
+                        color: tokens.colors.text.secondary,
+                        fontSize: tokens.typography.sizes.xs,
+                        cursor: 'pointer'
+                      }}
                     >
-                      {previewingId === v.id ? 'Playing...' : '🔊 Preview'}
-                    </Button>
+                      {previewingId === v.id ? <StopIcon size={11} /> : <PlayIcon size={11} />}
+                      <span>{previewingId === v.id ? 'PLAYING' : 'TEST'}</span>
+                    </button>
                   )}
                   {!v.available && (
-                    <span style={{ fontSize: '11px', color: tokens.colors.text.faint }}>
-                      Key needed
+                    <span style={{ fontSize: '10px', color: tokens.colors.text.faint, fontFamily: tokens.typography.fontMono }}>
+                      KEY NEEDED
                     </span>
                   )}
                 </div>
@@ -269,7 +337,7 @@ export const VoiceSelectorModal: React.FC<VoiceSelectorModalProps> = ({
             );
           })}
         </div>
-      </GlassSurface>
+      </div>
     </div>
   );
 };

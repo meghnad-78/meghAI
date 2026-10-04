@@ -46,20 +46,20 @@ export const IconButton: React.FC<IconButtonProps> = ({
         };
       case 'accent':
         return {
-          background: hovered ? 'rgba(0, 240, 255, 0.2)' : tokens.colors.accent.cyanMuted,
-          border: `1px solid ${hovered ? tokens.colors.border.accent : 'transparent'}`,
-          color: tokens.colors.accent.cyan
+          background: hovered ? tokens.colors.accent.primaryMuted : tokens.colors.accent.primarySubtle,
+          border: `1px solid ${hovered ? tokens.colors.border.focus : tokens.colors.border.accentSubtle}`,
+          color: tokens.colors.accent.primary
         };
       case 'danger':
         return {
-          background: hovered ? 'rgba(239, 68, 68, 0.22)' : tokens.colors.accent.roseMuted,
-          border: `1px solid ${hovered ? tokens.colors.accent.rose : 'rgba(239, 68, 68, 0.3)'}`,
-          color: '#FCA5A5'
+          background: hovered ? tokens.colors.semantic.errorMuted : 'rgba(191, 80, 73, 0.08)',
+          border: `1px solid ${hovered ? tokens.colors.semantic.error : 'rgba(191, 80, 73, 0.25)'}`,
+          color: tokens.colors.semantic.error
         };
       case 'secondary':
         return {
-          background: hovered ? tokens.colors.bg.glassHover : tokens.colors.bg.glass,
-          border: `1px solid ${hovered ? tokens.colors.border.hover : tokens.colors.border.default}`,
+          background: hovered ? tokens.colors.bg.elevated : tokens.colors.bg.surface,
+          border: `1px solid ${hovered ? tokens.colors.border.strong : tokens.colors.border.default}`,
           color: hovered ? tokens.colors.text.primary : tokens.colors.text.secondary
         };
       case 'ghost':

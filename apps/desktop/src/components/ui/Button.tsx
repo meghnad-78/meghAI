@@ -20,26 +20,24 @@ export const Button: React.FC<ButtonProps> = ({
   style,
   ...props
 }) => {
-  const [hovered, setHovered] = React.useState(false);
-
   const sizeStyles = {
     sm: {
       padding: '4px 10px',
       fontSize: tokens.typography.sizes.xs,
+      gap: '5px',
+      borderRadius: tokens.radii.xs
+    },
+    md: {
+      padding: '6px 14px',
+      fontSize: tokens.typography.sizes.sm,
       gap: '6px',
       borderRadius: tokens.radii.sm
     },
-    md: {
-      padding: '7px 14px',
-      fontSize: tokens.typography.sizes.sm,
+    lg: {
+      padding: '9px 18px',
+      fontSize: tokens.typography.sizes.base,
       gap: '8px',
       borderRadius: tokens.radii.md
-    },
-    lg: {
-      padding: '10px 20px',
-      fontSize: tokens.typography.sizes.base,
-      gap: '10px',
-      borderRadius: tokens.radii.lg
     }
   };
 
@@ -47,39 +45,38 @@ export const Button: React.FC<ButtonProps> = ({
     switch (variant) {
       case 'primary':
         return {
-          background: hovered ? tokens.colors.accent.cyanHover : tokens.colors.accent.cyan,
+          backgroundColor: tokens.colors.accent.primary,
           color: tokens.colors.text.inverse,
           border: '1px solid transparent',
-          fontWeight: 600,
-          boxShadow: hovered ? tokens.shadows.glowCyan : 'none'
+          fontWeight: 600
         };
       case 'accent':
         return {
-          background: hovered ? 'rgba(0, 240, 255, 0.22)' : tokens.colors.accent.cyanMuted,
-          color: tokens.colors.accent.cyan,
-          border: `1px solid ${hovered ? tokens.colors.border.accent : 'rgba(0, 240, 255, 0.2)'}`,
+          backgroundColor: tokens.colors.accent.primarySubtle,
+          color: tokens.colors.accent.primary,
+          border: `1px solid ${tokens.colors.border.accent}`,
           fontWeight: 600
         };
       case 'danger':
         return {
-          background: hovered ? 'rgba(239, 68, 68, 0.22)' : tokens.colors.accent.roseMuted,
-          color: '#FCA5A5',
-          border: `1px solid ${hovered ? tokens.colors.accent.rose : 'rgba(239, 68, 68, 0.3)'}`,
+          backgroundColor: tokens.colors.semantic.errorMuted,
+          color: '#f8b4b0',
+          border: `1px solid ${tokens.colors.semantic.error}`,
           fontWeight: 600
         };
       case 'ghost':
         return {
-          background: hovered ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
-          color: hovered ? tokens.colors.text.primary : tokens.colors.text.secondary,
+          backgroundColor: 'transparent',
+          color: tokens.colors.text.secondary,
           border: '1px solid transparent',
           fontWeight: 500
         };
       case 'secondary':
       default:
         return {
-          background: hovered ? tokens.colors.bg.glassHover : tokens.colors.bg.glass,
-          color: hovered ? tokens.colors.text.primary : tokens.colors.text.secondary,
-          border: `1px solid ${hovered ? tokens.colors.border.hover : tokens.colors.border.default}`,
+          backgroundColor: tokens.colors.bg.elevated,
+          color: tokens.colors.text.primary,
+          border: `1px solid ${tokens.colors.border.default}`,
           fontWeight: 500
         };
     }
@@ -88,8 +85,6 @@ export const Button: React.FC<ButtonProps> = ({
   return (
     <button
       disabled={disabled || loading}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -98,18 +93,23 @@ export const Button: React.FC<ButtonProps> = ({
         cursor: disabled || loading ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.45 : 1,
         transition: tokens.transitions.fast,
-        outline: 'none',
         userSelect: 'none',
-        whiteSpace: 'nowrap',
+        outline: 'none',
         ...sizeStyles[size],
         ...getVariantStyles(),
         ...style
       }}
       {...props}
     >
-      {icon && iconPosition === 'left' && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
-      {children && <span>{children}</span>}
-      {icon && iconPosition === 'right' && <span style={{ display: 'flex', alignItems: 'center' }}>{icon}</span>}
+      {loading ? (
+        <span style={{ fontSize: '11px', fontFamily: tokens.typography.fontMono }}>...</span>
+      ) : (
+        <>
+          {icon && iconPosition === 'left' && icon}
+          {children}
+          {icon && iconPosition === 'right' && icon}
+        </>
+      )}
     </button>
   );
 };

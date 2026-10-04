@@ -458,12 +458,16 @@ export type EventType =
   | 'AUDIO_PLAYBACK_COMPLETED'
   | 'TTS_COMPLETED'
   | 'TTS_FAILED'
+  | 'TTS_FALLBACK'
+  | 'TTS_FALLBACK_TRIGGERED'
   | 'AUDIO_PLAYBACK_FAILED'
   | 'TTS_INTERRUPTED'
   | 'AUDIO_CUE_STARTED'
   | 'AUDIO_CUE_COMPLETED'
   | 'AUDIO_STATE_CHANGED'
   | 'VOICE_ERROR'
+  | 'VOICE_NO_SPEECH_DETECTED'
+  | 'VOICE_DIAGNOSTICS_UPDATED'
   | 'VOICE_RECOGNITION_GATED'
   | 'VOICE_RECOGNITION_RESUMED'
   | 'INTERRUPTED'
@@ -597,7 +601,49 @@ export interface TTSSynthesisResult {
   format: 'wav' | 'mp3';
   sampleRate?: number;
   voiceId: string;
+  providerId?: string;
   spokenText: string;
+  fallbackTriggered?: boolean;
+  fallbackReason?: string;
+  originalVoiceId?: string;
+}
+
+export interface VoiceTurnDiagnostic {
+  voiceSessionId: string;
+  commandId: string;
+  micDeviceId: string | number;
+  micSampleRate: number;
+  micChannels: number;
+  audioFramesReceived: number;
+  audioBytesReceived: number;
+  averageRms: number;
+  maxRms: number;
+  vadState: string;
+  wakeState: string;
+  commandCaptureState: string;
+  sttProvider: string;
+  sttModel: string;
+  sttConnectionState: string;
+  sttFramesSent: number;
+  sttPartialTranscripts: string[];
+  sttFinalTranscript: string;
+  modelProviderRequested: string;
+  modelSelected: string;
+  modelLatencyMs: number;
+  ttsProviderRequested: string;
+  ttsVoiceRequested: string;
+  ttsProviderResolved: string;
+  ttsVoiceResolved: string;
+  ttsFallbackTriggered: boolean;
+  ttsFallbackReason?: string;
+  ttsAudioFormat: string;
+  ttsAudioBytes: number;
+  audioOutputDeviceId: string;
+  audioOutputLatencyMs: number;
+  completedSuccessfully: boolean;
+  failurePoint?: string;
+  turnDurationMs?: number;
+  timestamp?: number;
 }
 
 export interface TTSProvider {

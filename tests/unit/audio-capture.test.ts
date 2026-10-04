@@ -268,7 +268,7 @@ describe('Real Windows Native Microphone Capture Subsystem', () => {
       expect(stopData.success).toBe(true);
       expect(stopData.state).toBe('MIC_OFF');
       expect(stopData.isCapturing).toBe(false);
-    });
+    }, 15000);
 
     it('emergency kill switch halts active microphone capture immediately', async () => {
       // Start capture

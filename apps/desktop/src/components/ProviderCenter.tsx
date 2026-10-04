@@ -3,6 +3,7 @@ import { GlassSurface } from './ui/GlassSurface.js';
 import { Button } from './ui/Button.js';
 import { Badge } from './ui/Badge.js';
 import { tokens } from '../theme/tokens.js';
+import { Icons } from './ui/Icons.js';
 
 interface ProviderInfo {
   id: string;
@@ -90,7 +91,7 @@ export const ProviderCenter: React.FC = () => {
         body: JSON.stringify({ providerId: cleanId, apiKey: key })
       });
       if (res.ok) {
-        setSaveStatus(`Saved & activated key for ${providerId}.`);
+        setSaveStatus(`Saved & activated credentials for ${providerId}.`);
         setApiKeyInput(prev => ({ ...prev, [providerId]: '' }));
         await loadData();
       } else {
@@ -111,24 +112,47 @@ export const ProviderCenter: React.FC = () => {
         height: '100%',
         padding: '32px 40px',
         overflowY: 'auto',
-        maxWidth: '1080px',
+        maxWidth: '1100px',
         margin: '0 auto',
         width: '100%',
         boxSizing: 'border-box'
       }}
     >
       {/* Header */}
-      <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div
+        style={{
+          marginBottom: '24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          borderBottom: `1px solid ${tokens.colors.border.subtle}`,
+          paddingBottom: '20px'
+        }}
+      >
         <div>
-          <h2 style={{ margin: 0, fontSize: tokens.typography.sizes.xl, fontWeight: 700, color: tokens.colors.text.primary, letterSpacing: '-0.02em' }}>
-            Provider Infrastructure & Telemetry
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ color: tokens.colors.accent.primary, display: 'flex', alignItems: 'center' }}>
+              <Icons.Model size={22} />
+            </span>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: tokens.typography.sizes.xl,
+                fontWeight: 600,
+                color: tokens.colors.text.primary,
+                letterSpacing: tokens.typography.letterSpacing.tight,
+                fontFamily: tokens.typography.fontDisplay
+              }}
+            >
+              Provider Infrastructure & BYOK Telemetry
+            </h2>
+          </div>
           <p style={{ margin: '6px 0 0', fontSize: tokens.typography.sizes.sm, color: tokens.colors.text.secondary }}>
             Bring-Your-Own-Key (BYOK) credential management, latency health monitoring, and ₹0-first cost tracking.
           </p>
         </div>
         <Button size="sm" variant="secondary" onClick={loadData}>
-          ↻ Refresh
+          Refresh Diagnostics
         </Button>
       </div>
 
@@ -141,54 +165,66 @@ export const ProviderCenter: React.FC = () => {
           marginBottom: '28px'
         }}
       >
-        <GlassSurface elevation="subtle" style={{ padding: '16px 20px', borderRadius: tokens.radii.lg }}>
-          <div style={{ fontSize: '11px', color: tokens.colors.text.muted, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+        <GlassSurface elevation="subtle" style={{ padding: '16px 20px', borderRadius: tokens.radii.md }}>
+          <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
             Total Tokens Consumed
           </div>
-          <div style={{ fontSize: tokens.typography.sizes.xxl, fontWeight: 700, color: tokens.colors.text.primary, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+          <div style={{ fontSize: tokens.typography.sizes.xl, fontWeight: 600, color: tokens.colors.text.primary, marginTop: '6px', fontFamily: tokens.typography.fontMono }}>
             {(metrics?.totalTokensConsumed || 0).toLocaleString()}
           </div>
+          <div style={{ fontSize: '11px', color: tokens.colors.text.faint, marginTop: '2px' }}>
+            Cumulative inference tokens
+          </div>
         </GlassSurface>
 
-        <GlassSurface elevation="subtle" style={{ padding: '16px 20px', borderRadius: tokens.radii.lg }}>
-          <div style={{ fontSize: '11px', color: tokens.colors.text.muted, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+        <GlassSurface elevation="subtle" style={{ padding: '16px 20px', borderRadius: tokens.radii.md }}>
+          <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
             Cloud Spend (USD)
           </div>
-          <div style={{ fontSize: tokens.typography.sizes.xxl, fontWeight: 700, color: tokens.colors.accent.cyan, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+          <div style={{ fontSize: tokens.typography.sizes.xl, fontWeight: 600, color: tokens.colors.accent.primary, marginTop: '6px', fontFamily: tokens.typography.fontMono }}>
             ${(metrics?.totalCostUSD || 0).toFixed(4)}
           </div>
+          <div style={{ fontSize: '11px', color: tokens.colors.text.faint, marginTop: '2px' }}>
+            Direct provider billing
+          </div>
         </GlassSurface>
 
-        <GlassSurface elevation="subtle" style={{ padding: '16px 20px', borderRadius: tokens.radii.lg }}>
-          <div style={{ fontSize: '11px', color: tokens.colors.text.muted, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+        <GlassSurface elevation="subtle" style={{ padding: '16px 20px', borderRadius: tokens.radii.md }}>
+          <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
             Cloud Spend (INR)
           </div>
-          <div style={{ fontSize: tokens.typography.sizes.xxl, fontWeight: 700, color: tokens.colors.accent.purple, marginTop: '4px', fontFamily: tokens.typography.fontMono }}>
+          <div style={{ fontSize: tokens.typography.sizes.xl, fontWeight: 600, color: tokens.colors.semantic.info, marginTop: '6px', fontFamily: tokens.typography.fontMono }}>
             ₹{(metrics?.totalCostINR || 0).toFixed(2)}
+          </div>
+          <div style={{ fontSize: '11px', color: tokens.colors.text.faint, marginTop: '2px' }}>
+            Normalized exchange rate
           </div>
         </GlassSurface>
 
-        <GlassSurface elevation="subtle" style={{ padding: '16px 20px', borderRadius: tokens.radii.lg }}>
-          <div style={{ fontSize: '11px', color: tokens.colors.text.muted, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+        <GlassSurface elevation="subtle" style={{ padding: '16px 20px', borderRadius: tokens.radii.md }}>
+          <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
             ₹0-First Offline Savings
           </div>
-          <div style={{ fontSize: tokens.typography.sizes.xxl, fontWeight: 700, color: tokens.colors.accent.emerald, marginTop: '4px' }}>
+          <div style={{ fontSize: tokens.typography.sizes.xl, fontWeight: 600, color: tokens.colors.semantic.success, marginTop: '6px', fontFamily: tokens.typography.fontMono }}>
             100% Free
           </div>
-          <div style={{ fontSize: '10px', color: tokens.colors.text.muted, marginTop: '2px' }}>Local Ollama / Win32</div>
+          <div style={{ fontSize: '11px', color: tokens.colors.text.faint, marginTop: '2px' }}>
+            Local Ollama + Windows OneCore
+          </div>
         </GlassSurface>
       </div>
 
       {saveStatus && (
         <div
           style={{
-            background: 'rgba(16, 185, 129, 0.1)',
-            border: '1px solid rgba(16, 185, 129, 0.3)',
-            color: tokens.colors.accent.emerald,
-            borderRadius: tokens.radii.md,
+            background: tokens.colors.semantic.successMuted,
+            border: `1px solid ${tokens.colors.semantic.success}`,
+            color: tokens.colors.semantic.success,
+            borderRadius: tokens.radii.sm,
             padding: '10px 16px',
             fontSize: tokens.typography.sizes.sm,
-            marginBottom: '20px'
+            marginBottom: '20px',
+            fontFamily: tokens.typography.fontMono
           }}
         >
           {saveStatus}
@@ -203,7 +239,7 @@ export const ProviderCenter: React.FC = () => {
           const status = p.health?.status;
 
           let badgeVariant: 'success' | 'warning' | 'danger' | 'neutral' = 'neutral';
-          let badgeText = 'OFFLINE / UNCONFIGURED';
+          let badgeText = 'UNCONFIGURED';
 
           if (isHealthy) {
             badgeVariant = 'success';
@@ -225,7 +261,7 @@ export const ProviderCenter: React.FC = () => {
               elevation="surface"
               style={{
                 padding: '16px 20px',
-                borderRadius: tokens.radii.lg,
+                borderRadius: tokens.radii.md,
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
@@ -234,7 +270,7 @@ export const ProviderCenter: React.FC = () => {
             >
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: tokens.typography.sizes.md, fontWeight: 600, color: tokens.colors.text.primary }}>
+                  <span style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary }}>
                     {p.name}
                   </span>
                   <Badge variant={badgeVariant} size="sm">{badgeText}</Badge>
@@ -248,7 +284,7 @@ export const ProviderCenter: React.FC = () => {
                   ) : null}
                 </div>
                 <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, marginTop: '4px' }}>
-                  ID: <code style={{ color: tokens.colors.text.secondary }}>{p.id}</code> • Status: {p.isConfigured ? 'Configured & Active' : 'Requires BYOK API Key'}
+                  ID: <code style={{ color: tokens.colors.text.secondary, fontFamily: tokens.typography.fontMono }}>{p.id}</code> • Status: {p.isConfigured ? 'Active & Configured' : 'Requires API Key'}
                   {p.health?.message ? ` • ${p.health.message}` : ''}
                 </div>
               </div>
@@ -261,9 +297,9 @@ export const ProviderCenter: React.FC = () => {
                     value={apiKeyInput[p.id] || ''}
                     onChange={e => setApiKeyInput(prev => ({ ...prev, [p.id]: e.target.value }))}
                     style={{
-                      background: 'rgba(255, 255, 255, 0.04)',
+                      background: tokens.colors.bg.subtle,
                       border: `1px solid ${tokens.colors.border.default}`,
-                      borderRadius: tokens.radii.md,
+                      borderRadius: tokens.radii.sm,
                       padding: '7px 12px',
                       color: tokens.colors.text.primary,
                       fontSize: tokens.typography.sizes.xs,

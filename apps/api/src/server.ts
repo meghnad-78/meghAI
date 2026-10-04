@@ -25,7 +25,8 @@ import {
   SpeechRecognitionService,
   VoiceInputManager,
   AcousticWakeWordDetector,
-  WakeWordDetector
+  WakeWordDetector,
+  globalVoiceDiagnostics
 } from '@meghai/voice';
 import { PersonalKnowledgeGraph } from '@meghai/knowledge-graph';
 import { IntegrationRegistry } from '@meghai/integrations';
@@ -92,6 +93,7 @@ export class MeghAIServer {
     this.contextEngine = new ContextEngine(this.memoryManager, this.permissionBroker);
     this.ttsProvider = new WindowsSapiTTSProvider();
     this.voiceCatalogService = new VoiceCatalogService();
+    this.voiceCatalogService.setEventBus(this.eventBus);
     this.audioPlayback = new AudioPlaybackService({ eventBus: this.eventBus });
     this.audioCapture = new AudioCaptureService({
       permissionBroker: this.permissionBroker,
@@ -165,7 +167,16 @@ export class MeghAIServer {
     this.voiceCatalogService.initialize().then(voices => {
       if (voices.length > 0) {
         const cur = this.voiceSettings.getSettings().selectedVoiceId;
-        if (!voices.some(v => v.id === cur)) {
+        // Do NOT clobber if user explicitly chose a cloud voice or valid existing voice
+        const isCloudOrKnownVoice = cur && (
+          cur.startsWith('eleven-') ||
+          cur.startsWith('elevenlabs-') ||
+          cur.startsWith('goog-') ||
+          cur.startsWith('openai-') ||
+          cur.startsWith('onecore-') ||
+          this.voiceCatalogService.getVoice(cur) !== undefined
+        );
+        if (!isCloudOrKnownVoice && !voices.some(v => v.id === cur)) {
           const defaultVoice = voices.find(v => v.id === 'onecore-heera') || voices[0];
           if (defaultVoice) {
             this.voiceSettings.updateSettings({
@@ -736,7 +747,8 @@ export class MeghAIServer {
                 voiceId,
                 speechRate: settings.speechRate,
                 pitch: settings.pitch,
-                volume: settings.volume
+                volume: settings.volume,
+                allowFallback: false
               });
 
               this.eventBus.publish('TTS_AUDIO_READY', {
@@ -901,7 +913,11 @@ export class MeghAIServer {
               let body: any = {};
               try { body = await this.readJsonBody(req); } catch {}
               await this.audioCapture.start({ deviceId: body?.deviceId });
-              await this.voiceInput.startPassiveListening();
+              if (body?.mode === 'command') {
+                await this.voiceInput.startCommandCapture(body?.reason || 'API mic start command mode');
+              } else {
+                await this.voiceInput.startPassiveListening();
+              }
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({
                 success: true,
@@ -918,6 +934,44 @@ export class MeghAIServer {
                 state: this.audioCapture.getState()
               }));
             }
+            return;
+          }
+
+          // Direct Listen / Command Capture: /api/v1/voice/listen
+          if (pathname === '/api/v1/voice/listen' && req.method === 'POST') {
+            try {
+              let body: any = {};
+              try { body = await this.readJsonBody(req); } catch {}
+              if (!this.audioCapture.isCapturing()) {
+                await this.audioCapture.start({ deviceId: body?.deviceId });
+              }
+              await this.voiceInput.startCommandCapture(body?.reason || 'User activated listen mode');
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                success: true,
+                state: this.audioCapture.getState(),
+                voiceInputState: this.voiceInput.getState(),
+                isCapturing: this.audioCapture.isCapturing()
+              }));
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+            return;
+          }
+
+          // Voice Diagnostics Last Turn: /api/v1/voice/diagnostics/last
+          if (pathname === '/api/v1/voice/diagnostics/last' && req.method === 'GET') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(globalVoiceDiagnostics.getLastTurn() || null));
+            return;
+          }
+
+          // Voice Diagnostics History: /api/v1/voice/diagnostics/history
+          if (pathname === '/api/v1/voice/diagnostics/history' && req.method === 'GET') {
+            const limit = parseInt(url.searchParams.get('limit') || '10', 10);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(globalVoiceDiagnostics.getHistory(limit)));
             return;
           }
 
@@ -1139,6 +1193,7 @@ export class MeghAIServer {
     if (!cleanSpeechText) return;
 
     const ttsCorrId = correlationId || `tts-${Date.now()}`;
+    globalVoiceDiagnostics.recordTtsRequested(settings.selectedProvider || 'unknown', settings.selectedVoiceId);
     this.eventBus.publish('TTS_REQUESTED', {
       voiceId: settings.selectedVoiceId,
       text: cleanSpeechText
@@ -1164,12 +1219,16 @@ export class MeghAIServer {
         });
 
         if (stream) {
+          const playStart = Date.now();
           const streamResult = await this.audioPlayback.playTTSStream(stream, {
             voiceId: settings.selectedVoiceId,
             text: cleanSpeechText,
             correlationId: ttsCorrId
           });
           streamPlayed = true;
+          globalVoiceDiagnostics.recordTtsResolved(settings.selectedProvider || 'unknown', settings.selectedVoiceId);
+          globalVoiceDiagnostics.recordAudioOutput('default', Date.now() - playStart);
+          globalVoiceDiagnostics.completeTurn(true);
           this.eventBus.publish('TTS_COMPLETED', {
             voiceId: settings.selectedVoiceId,
             durationMs: streamResult.durationMs,
@@ -1186,8 +1245,27 @@ export class MeghAIServer {
           voiceId: settings.selectedVoiceId,
           speechRate: settings.speechRate,
           pitch: settings.pitch,
-          volume: settings.volume
+          volume: settings.volume,
+          allowFallback: true
         });
+
+        if (synthesis.fallbackTriggered) {
+          this.eventBus.publish('TTS_FALLBACK', {
+            originalVoiceId: synthesis.originalVoiceId || settings.selectedVoiceId,
+            fallbackVoiceId: synthesis.voiceId,
+            reason: synthesis.fallbackReason
+          }, ttsCorrId);
+          globalVoiceDiagnostics.recordTtsFallback(
+            synthesis.providerId || 'unknown',
+            synthesis.voiceId,
+            synthesis.fallbackReason || 'fallback'
+          );
+        } else {
+          globalVoiceDiagnostics.recordTtsResolved(
+            synthesis.providerId || 'unknown',
+            synthesis.voiceId
+          );
+        }
 
         this.eventBus.publish('TTS_AUDIO_READY', {
           voiceId: synthesis.voiceId,
@@ -1201,11 +1279,14 @@ export class MeghAIServer {
         } catch {}
 
         // 3. Play synthesized speech through default audio output device
+        const playStart = Date.now();
         await this.audioPlayback.playTTS(synthesis, {
           voiceId: synthesis.voiceId,
           text: cleanSpeechText,
           correlationId: ttsCorrId
         });
+        globalVoiceDiagnostics.recordAudioOutput('default', Date.now() - playStart);
+        globalVoiceDiagnostics.completeTurn(true);
 
         this.eventBus.publish('TTS_COMPLETED', {
           voiceId: synthesis.voiceId,
@@ -1213,6 +1294,7 @@ export class MeghAIServer {
         }, ttsCorrId);
       }
     } catch (err: any) {
+      globalVoiceDiagnostics.completeTurn(false, `TTS_FAILED: ${err.message}`);
       this.eventBus.publish('TTS_FAILED', { error: err.message, voiceId: settings.selectedVoiceId }, ttsCorrId);
       this.eventBus.publish('VOICE_ERROR', { error: err.message }, ttsCorrId);
     } finally {

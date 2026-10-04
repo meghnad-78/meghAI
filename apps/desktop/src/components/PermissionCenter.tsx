@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { PermissionScope, PermissionMode, PermissionGrant } from '@meghai/shared-types';
+import { tokens } from '../theme/tokens.js';
+import { Icons } from './ui/Icons.js';
 
 const ALL_SCOPES: PermissionScope[] = [
   'MICROPHONE',
@@ -58,100 +60,191 @@ export const PermissionCenter: React.FC = () => {
     return found ? found.mode : 'ASK';
   };
 
+  const getModeColor = (mode: PermissionMode) => {
+    switch (mode) {
+      case 'DENIED':
+        return tokens.colors.semantic.error;
+      case 'ALLOWED':
+        return tokens.colors.semantic.success;
+      case 'ALLOWED_WITH_CONFIRMATION':
+      case 'ASK':
+        return tokens.colors.semantic.warning;
+      case 'LOCAL_ONLY':
+        return tokens.colors.accent.primary;
+      default:
+        return tokens.colors.text.muted;
+    }
+  };
+
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', padding: '24px', overflowY: 'auto' }}>
-      <div style={{ marginBottom: '20px' }}>
-        <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#f8fafc' }}>Safety & Permission Center</h2>
-        <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        padding: '28px 36px',
+        overflowY: 'auto',
+        maxWidth: '1200px',
+        margin: '0 auto',
+        width: '100%',
+        boxSizing: 'border-box'
+      }}
+    >
+      <div
+        style={{
+          marginBottom: '24px',
+          borderBottom: `1px solid ${tokens.colors.border.subtle}`,
+          paddingBottom: '20px'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ color: tokens.colors.accent.primary, display: 'flex', alignItems: 'center' }}>
+            <Icons.Security size={22} />
+          </span>
+          <h2
+            style={{
+              margin: 0,
+              fontSize: tokens.typography.sizes.xl,
+              fontWeight: 600,
+              color: tokens.colors.text.primary,
+              letterSpacing: tokens.typography.letterSpacing.tight,
+              fontFamily: tokens.typography.fontDisplay
+            }}
+          >
+            Permission Broker & Safety Governance
+          </h2>
+        </div>
+        <p style={{ margin: '6px 0 0', fontSize: tokens.typography.sizes.sm, color: tokens.colors.text.secondary }}>
           Authoritative 16-scope policy broker. Principle 3.3: User request is not unlimited permission.
         </p>
       </div>
 
       {/* Security Architecture Guarantees */}
-      <div style={{
-        background: 'rgba(15, 23, 42, 0.65)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: '12px',
-        padding: '16px',
-        marginBottom: '20px',
-        display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: '12px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: '#10b981', fontSize: '16px' }}>✓</span>
+      <div
+        style={{
+          background: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.default}`,
+          borderRadius: tokens.radii.md,
+          padding: '16px',
+          marginBottom: '20px',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '12px'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ color: tokens.colors.semantic.success, display: 'flex', alignItems: 'center' }}>
+            <Icons.Check size={16} />
+          </span>
           <div>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc' }}>HMAC IPC Auth</div>
-            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Signed RPC tokens</div>
+            <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.text.primary }}>
+              HMAC IPC Auth
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.muted }}>
+              Signed RPC tokens
+            </div>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: '#10b981', fontSize: '16px' }}>✓</span>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ color: tokens.colors.semantic.success, display: 'flex', alignItems: 'center' }}>
+            <Icons.Check size={16} />
+          </span>
           <div>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc' }}>Path Traversal Guard</div>
-            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Restricted to User Home</div>
+            <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.text.primary }}>
+              Path Traversal Guard
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.muted }}>
+              Restricted user sandbox
+            </div>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: '#10b981', fontSize: '16px' }}>✓</span>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ color: tokens.colors.semantic.success, display: 'flex', alignItems: 'center' }}>
+            <Icons.Check size={16} />
+          </span>
           <div>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc' }}>Injection Defense</div>
-            <div style={{ fontSize: '10px', color: '#94a3b8' }}>Fenced untrusted data</div>
+            <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.text.primary }}>
+              Prompt Injection Defense
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.muted }}>
+              Fenced external payloads
+            </div>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: '#10b981', fontSize: '16px' }}>✓</span>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span style={{ color: tokens.colors.semantic.success, display: 'flex', alignItems: 'center' }}>
+            <Icons.Check size={16} />
+          </span>
           <div>
-            <div style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc' }}>Kill Switch Armed</div>
-            <div style={{ fontSize: '10px', color: '#94a3b8' }}>"STOP MEGH" priority</div>
+            <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.text.primary }}>
+              Kill Switch Armed
+            </div>
+            <div style={{ fontSize: '11px', color: tokens.colors.text.muted }}>
+              "STOP MEGH" priority
+            </div>
           </div>
         </div>
       </div>
 
       {statusMsg && (
-        <div style={{ background: 'rgba(56, 189, 248, 0.1)', border: '1px solid #38bdf8', color: '#38bdf8', borderRadius: '8px', padding: '8px 12px', fontSize: '12px', marginBottom: '16px' }}>
+        <div
+          style={{
+            background: tokens.colors.accent.primarySubtle,
+            border: `1px solid ${tokens.colors.accent.primary}`,
+            color: tokens.colors.accent.primary,
+            borderRadius: tokens.radii.sm,
+            padding: '8px 14px',
+            fontSize: tokens.typography.sizes.xs,
+            marginBottom: '16px',
+            fontFamily: tokens.typography.fontMono
+          }}
+        >
           {statusMsg}
         </div>
       )}
 
       {/* 16 Scopes Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '12px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '10px' }}>
         {ALL_SCOPES.map(scope => {
           const currentMode = getGrantForScope(scope);
-          const isDenied = currentMode === 'DENIED';
-          const isAllowed = currentMode === 'ALLOWED';
+          const color = getModeColor(currentMode);
 
           return (
             <div
               key={scope}
               style={{
-                background: 'rgba(15, 23, 42, 0.55)',
-                border: `1px solid ${isDenied ? 'rgba(239, 68, 68, 0.3)' : isAllowed ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.08)'}`,
-                borderRadius: '10px',
-                padding: '14px',
+                background: tokens.colors.bg.surface,
+                border: `1px solid ${tokens.colors.border.subtle}`,
+                borderRadius: tokens.radii.sm,
+                padding: '12px 16px',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center'
               }}
             >
               <div>
-                <div style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc' }}>
+                <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.text.primary, fontFamily: tokens.typography.fontMono }}>
                   {scope}
                 </div>
-                <div style={{ fontSize: '11px', color: isDenied ? '#f87171' : isAllowed ? '#34d399' : '#fbbf24', marginTop: '2px', fontWeight: 600 }}>
-                  Mode: {currentMode}
+                <div style={{ fontSize: '11px', color, marginTop: '2px', fontWeight: 600, fontFamily: tokens.typography.fontMono }}>
+                  POLICY: {currentMode}
                 </div>
               </div>
               <select
                 value={currentMode}
                 onChange={e => handleUpdateGrant(scope, e.target.value as PermissionMode)}
                 style={{
-                  background: 'rgba(7, 9, 14, 0.8)',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  color: '#f8fafc',
-                  borderRadius: '6px',
-                  padding: '6px 10px',
-                  fontSize: '12px'
+                  background: tokens.colors.bg.subtle,
+                  border: `1px solid ${tokens.colors.border.default}`,
+                  color: tokens.colors.text.primary,
+                  borderRadius: tokens.radii.xs,
+                  padding: '5px 8px',
+                  fontSize: tokens.typography.sizes.xs,
+                  fontFamily: tokens.typography.fontMono
                 }}
               >
                 <option value="ALLOWED">ALLOWED</option>

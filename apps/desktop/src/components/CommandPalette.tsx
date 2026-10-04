@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { SearchIcon, CloseIcon, ChevronRightIcon } from './ui/Icons.js';
+import { tokens } from '../theme/tokens.js';
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -12,40 +14,59 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
   if (!isOpen) return null;
 
   const quickActions = [
-    { label: 'Create a Note', command: 'Megh, create a note titled Project Alpha with content Architecture finalized.' },
-    { label: 'Open Calculator', command: 'Hey Megh, open Calculator' },
-    { label: 'Find Resume', command: 'Megh, find my resume' },
-    { label: 'System Info', command: 'What is my current system status?' },
-    { label: 'Hindi Reminder', command: 'Megh kal mera 8 baje ka reminder laga dena' }
+    { label: 'System Process Audit', command: 'What is my current system status and process memory consumption?', category: 'SYSTEM' },
+    { label: 'Launch Calculator', command: 'Hey Megh, open Calculator', category: 'WINDOWS' },
+    { label: 'Technical Documentation', command: 'Explain how quantum annealing differs from gate-based circuits.', category: 'REASONING' },
+    { label: 'Create Project Note', command: 'Megh, create a note titled Architecture Finalization with verified components.', category: 'WORKSPACE' },
+    { label: 'Voice Mode Query', command: 'Hey Megh, what is on my schedule today?', category: 'VOICE' }
   ];
 
+  const filtered = quickActions.filter(a =>
+    !input.trim() ||
+    a.label.toLowerCase().includes(input.toLowerCase()) ||
+    a.command.toLowerCase().includes(input.toLowerCase())
+  );
+
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100vw',
-      height: '100vh',
-      background: 'rgba(0, 0, 0, 0.7)',
-      backdropFilter: 'blur(8px)',
-      display: 'flex',
-      alignItems: 'flex-start',
-      justifyContent: 'center',
-      paddingTop: '15vh',
-      zIndex: 100
-    }} onClick={onClose}>
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: tokens.colors.bg.overlay,
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'center',
+        paddingTop: '14vh',
+        zIndex: tokens.zIndex.modal,
+        userSelect: 'none'
+      }}
+      onClick={onClose}
+    >
       <div
         style={{
-          width: '580px',
-          background: 'rgba(15, 23, 42, 0.95)',
-          border: '1px solid rgba(0, 240, 255, 0.3)',
-          borderRadius: '16px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 30px rgba(0, 240, 255, 0.15)',
+          width: '100%',
+          maxWidth: '580px',
+          backgroundColor: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.strong}`,
+          borderRadius: tokens.radii.lg,
           overflow: 'hidden'
         }}
         onClick={e => e.stopPropagation()}
       >
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+        {/* Command Search Bar */}
+        <div
+          style={{
+            padding: '14px 18px',
+            borderBottom: `1px solid ${tokens.colors.border.subtle}`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            backgroundColor: tokens.colors.bg.subtle
+          }}
+        >
+          <SearchIcon size={16} color={tokens.colors.text.muted} />
           <input
             autoFocus
             type="text"
@@ -59,25 +80,47 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
               }
               if (e.key === 'Escape') onClose();
             }}
-            placeholder="Type a command, ask Megh, or run an action... (Esc to close)"
+            placeholder="Command MeghAI, search tools, trigger action... (Esc to close)"
             style={{
-              width: '100%',
+              flex: 1,
               background: 'transparent',
               border: 'none',
               outline: 'none',
-              color: '#f8fafc',
-              fontSize: '16px',
-              fontFamily: 'inherit'
+              color: tokens.colors.text.primary,
+              fontSize: tokens.typography.sizes.base,
+              fontFamily: tokens.typography.fontSans
             }}
           />
+          <button
+            onClick={onClose}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: tokens.colors.text.muted,
+              cursor: 'pointer',
+              padding: '2px'
+            }}
+          >
+            <CloseIcon size={14} />
+          </button>
         </div>
 
-        <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', marginBottom: '4px' }}>
-            Quick Prompts
-          </span>
-          {quickActions.map((action, idx) => (
-            <button
+        {/* Action Items */}
+        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div
+            style={{
+              fontSize: '10px',
+              fontFamily: tokens.typography.fontMono,
+              color: tokens.colors.text.faint,
+              padding: '2px 8px 6px',
+              letterSpacing: '0.04em'
+            }}
+          >
+            SUGGESTED EXECUTIONS
+          </div>
+
+          {filtered.map((action, idx) => (
+            <div
               key={idx}
               onClick={() => {
                 onSubmit(action.command);
@@ -88,21 +131,45 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({ isOpen, onClose,
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '8px 12px',
-                borderRadius: '8px',
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: 'none',
-                color: '#e2e8f0',
-                fontSize: '13px',
-                textAlign: 'left',
+                borderRadius: tokens.radii.xs,
+                backgroundColor: tokens.colors.bg.elevated,
+                border: `1px solid ${tokens.colors.border.subtle}`,
                 cursor: 'pointer',
-                transition: 'background 0.15s ease'
+                transition: tokens.transitions.fast
               }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0, 240, 255, 0.1)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)')}
             >
-              <span>{action.label}</span>
-              <span style={{ fontSize: '11px', color: '#94a3b8' }}>{action.command.slice(0, 35)}...</span>
-            </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  style={{
+                    fontSize: '9px',
+                    fontFamily: tokens.typography.fontMono,
+                    color: tokens.colors.accent.primary,
+                    padding: '1px 5px',
+                    borderRadius: tokens.radii.xs,
+                    backgroundColor: tokens.colors.accent.primarySubtle
+                  }}
+                >
+                  {action.category}
+                </span>
+                <span
+                  style={{
+                    fontSize: tokens.typography.sizes.sm,
+                    fontFamily: tokens.typography.fontSans,
+                    color: tokens.colors.text.primary,
+                    fontWeight: 500
+                  }}
+                >
+                  {action.label}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '11px', color: tokens.colors.text.muted, fontFamily: tokens.typography.fontMono }}>
+                  {action.command.slice(0, 32)}...
+                </span>
+                <ChevronRightIcon size={12} color={tokens.colors.text.faint} />
+              </div>
+            </div>
           ))}
         </div>
       </div>

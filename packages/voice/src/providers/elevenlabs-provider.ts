@@ -19,8 +19,34 @@ export class ElevenLabsTTSProvider implements TTSProvider {
   public readonly id = 'elevenlabs';
   public readonly name = 'ElevenLabs Generative Voice';
 
+  private apiKey?: string;
+
+  constructor(apiKeyOrOptions?: string | { apiKey?: string }) {
+    if (typeof apiKeyOrOptions === 'string') {
+      this.apiKey = apiKeyOrOptions;
+    } else if (apiKeyOrOptions && typeof apiKeyOrOptions === 'object') {
+      this.apiKey = apiKeyOrOptions.apiKey;
+    }
+    if (!this.apiKey) {
+      this.apiKey = process.env['ELEVENLABS_API_KEY'];
+    }
+  }
+
+  public getApiKey(): string | undefined {
+    return this.apiKey || process.env['ELEVENLABS_API_KEY'];
+  }
+
+  public setApiKey(key: string): void {
+    this.apiKey = key;
+  }
+
+  public isConfigured(): boolean {
+    const key = this.getApiKey();
+    return Boolean(key && key.trim().length > 0);
+  }
+
   public async listVoices(): Promise<VoiceProfile[]> {
-    const apiKey = process.env['ELEVENLABS_API_KEY'];
+    const apiKey = this.getApiKey();
     const hasKey = Boolean(apiKey && apiKey.trim().length > 0);
     const reason = hasKey ? undefined : 'API key (ELEVENLABS_API_KEY) not configured';
 
@@ -78,8 +104,56 @@ export class ElevenLabsTTSProvider implements TTSProvider {
     }));
   }
 
+  /**
+   * Helper to accurately match requested voice ID to profile and official ElevenLabs API voice_id
+   */
+  public resolveVoiceId(voiceId: string, catalog: VoiceProfile[]): { profile: VoiceProfile; apiVoiceId: string } {
+    const raw = (voiceId || 'eleven-rachel').trim();
+    const clean = raw.toLowerCase();
+
+    // If directly passed a raw 20-character ElevenLabs external ID
+    if (/^[a-zA-Z0-9]{18,24}$/.test(raw) && !raw.startsWith('eleven-') && !raw.startsWith('onecore-')) {
+      const match = catalog.find(v => v.providerVoiceId === raw || v.style === raw);
+      if (match) {
+        return { profile: match, apiVoiceId: raw };
+      }
+      return {
+        profile: {
+          id: `eleven-${raw}`,
+          name: `ElevenLabs Custom (${raw.slice(0, 6)}...)`,
+          provider: 'elevenlabs',
+          language: 'en-US',
+          gender: 'female',
+          naturalness: 'generative',
+          isAvailable: true,
+          style: raw,
+          providerVoiceId: raw
+        },
+        apiVoiceId: raw
+      };
+    }
+
+    // Lookup in catalog by ID, providerVoiceId, style, name, or clean suffix
+    const match = catalog.find(v =>
+      v.id.toLowerCase() === clean ||
+      (v.providerVoiceId && v.providerVoiceId.toLowerCase() === clean) ||
+      (v.style && v.style.toLowerCase() === clean) ||
+      v.name.toLowerCase() === clean ||
+      v.name.toLowerCase().replace(/^elevenlabs\s*/i, '') === clean.replace(/^eleven(labs)?-/, '') ||
+      v.id.toLowerCase().replace(/^eleven-/, '') === clean.replace(/^eleven(labs)?-/, '')
+    );
+
+    if (match) {
+      return { profile: match, apiVoiceId: match.style || match.providerVoiceId || '21m00Tcm4TlvDq8ikWAM' };
+    }
+
+    // Default to Rachel
+    const fallback = catalog[0] || this.getElevenLabsCatalog()[0];
+    return { profile: fallback, apiVoiceId: fallback.style || fallback.providerVoiceId || '21m00Tcm4TlvDq8ikWAM' };
+  }
+
   public async synthesize(text: string, options: TTSOptions = {}): Promise<TTSSynthesisResult> {
-    const apiKey = process.env['ELEVENLABS_API_KEY'];
+    const apiKey = this.getApiKey();
     if (!apiKey) {
       throw new Error('ElevenLabs TTS requires ELEVENLABS_API_KEY to be configured.');
     }
@@ -89,12 +163,8 @@ export class ElevenLabsTTSProvider implements TTSProvider {
       throw new Error('TTS synthesis text cannot be empty.');
     }
 
-    const voiceId = options.voiceId || 'eleven-rachel';
     const catalog = await this.listVoices();
-    const voiceProfile = catalog.find(v => v.id === voiceId) || catalog[0];
-
-    // Extract elevenlabs model ID from description/mapping or use Rachel default
-    const apiVoiceId = voiceProfile.style || '21m00Tcm4TlvDq8ikWAM';
+    const { profile: voiceProfile, apiVoiceId } = this.resolveVoiceId(options.voiceId || 'eleven-rachel', catalog);
     const sampleRate = 24000;
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${apiVoiceId}?output_format=pcm_24000`, {
@@ -139,6 +209,7 @@ export class ElevenLabsTTSProvider implements TTSProvider {
       format: 'wav',
       sampleRate,
       voiceId: voiceProfile.id,
+      providerId: this.id,
       spokenText: cleanText
     };
   }
@@ -150,7 +221,7 @@ export class ElevenLabsTTSProvider implements TTSProvider {
     text: string,
     options: TTSOptions = {}
   ): Promise<{ stream: AsyncIterable<Buffer>; voiceId: string; sampleRate: number }> {
-    const apiKey = process.env['ELEVENLABS_API_KEY'];
+    const apiKey = this.getApiKey();
     if (!apiKey) {
       throw new Error('ElevenLabs TTS requires ELEVENLABS_API_KEY to be configured.');
     }
@@ -160,10 +231,8 @@ export class ElevenLabsTTSProvider implements TTSProvider {
       throw new Error('TTS synthesis text cannot be empty.');
     }
 
-    const voiceId = options.voiceId || 'eleven-rachel';
     const catalog = await this.listVoices();
-    const voiceProfile = catalog.find(v => v.id === voiceId) || catalog[0];
-    const apiVoiceId = voiceProfile.style || '21m00Tcm4TlvDq8ikWAM';
+    const { profile: voiceProfile, apiVoiceId } = this.resolveVoiceId(options.voiceId || 'eleven-rachel', catalog);
     const sampleRate = 24000;
 
     const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${apiVoiceId}/stream?output_format=pcm_24000`, {
@@ -207,7 +276,7 @@ export class ElevenLabsTTSProvider implements TTSProvider {
   }
 
   public async isAvailable(): Promise<boolean> {
-    return Boolean(process.env['ELEVENLABS_API_KEY']);
+    return Boolean(this.getApiKey());
   }
 
   private getElevenLabsCatalog(): VoiceProfile[] {

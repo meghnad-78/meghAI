@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { MeghAIEvent } from '@meghai/shared-types';
-import { Badge } from './ui/Badge.js';
+import { TimelineIcon, CloseIcon } from './ui/Icons.js';
 import { tokens } from '../theme/tokens.js';
 
 interface ActionTimelineDrawerProps {
@@ -45,19 +45,19 @@ export const ActionTimelineDrawer: React.FC<ActionTimelineDrawerProps> = ({
 
   const getEventCategoryColor = (type: string) => {
     if (type.includes('FAIL') || type.includes('ERROR') || type.includes('RATE_LIMITED') || type === 'KILL_SWITCH_ACTIVATED') {
-      return tokens.colors.accent.rose;
+      return tokens.colors.semantic.error;
     }
     if (type.startsWith('MODEL_') || type.startsWith('TASK_')) {
-      return tokens.colors.accent.purple;
+      return tokens.colors.accent.primary;
     }
     if (type.startsWith('VOICE_') || type.startsWith('TTS_') || type.startsWith('MIC_')) {
-      return tokens.colors.accent.cyan;
+      return tokens.colors.accent.primary;
     }
     if (type.startsWith('MEMORY_')) {
-      return tokens.colors.accent.amber;
+      return tokens.colors.semantic.warning;
     }
     if (type.includes('VERIF') || type.includes('COMPLETED')) {
-      return tokens.colors.accent.emerald;
+      return tokens.colors.semantic.success;
     }
     return tokens.colors.text.muted;
   };
@@ -70,8 +70,9 @@ export const ActionTimelineDrawer: React.FC<ActionTimelineDrawerProps> = ({
         zIndex: tokens.zIndex.drawer,
         display: 'flex',
         justifyContent: 'flex-end',
-        background: 'rgba(4, 6, 10, 0.45)',
+        backgroundColor: tokens.colors.bg.overlay,
         backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
         userSelect: 'none'
       }}
       onClick={onClose}
@@ -79,14 +80,12 @@ export const ActionTimelineDrawer: React.FC<ActionTimelineDrawerProps> = ({
       <div
         style={{
           width: '100%',
-          maxWidth: '420px',
+          maxWidth: '440px',
           height: '100%',
-          background: tokens.colors.bg.surface,
-          borderLeft: `1px solid ${tokens.colors.border.default}`,
-          boxShadow: tokens.shadows.floating,
+          backgroundColor: tokens.colors.bg.surface,
+          borderLeft: `1px solid ${tokens.colors.border.strong}`,
           display: 'flex',
-          flexDirection: 'column',
-          animation: 'megh-fade-in 0.2s ease-out'
+          flexDirection: 'column'
         }}
         onClick={e => e.stopPropagation()}
       >
@@ -101,10 +100,29 @@ export const ActionTimelineDrawer: React.FC<ActionTimelineDrawerProps> = ({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: tokens.typography.sizes.md, fontWeight: 700, color: tokens.colors.text.primary }}>
+            <TimelineIcon size={16} color={tokens.colors.accent.primary} />
+            <span
+              style={{
+                fontFamily: tokens.typography.fontDisplay,
+                fontSize: tokens.typography.sizes.md,
+                fontWeight: 700,
+                color: tokens.colors.text.primary
+              }}
+            >
               Action Timeline
             </span>
-            <Badge variant="neutral" size="sm">{events.length}</Badge>
+            <span
+              style={{
+                fontFamily: tokens.typography.fontMono,
+                fontSize: '10px',
+                color: tokens.colors.text.faint,
+                padding: '1px 5px',
+                border: `1px solid ${tokens.colors.border.subtle}`,
+                borderRadius: tokens.radii.xs
+              }}
+            >
+              {events.length}
+            </span>
           </div>
 
           <button
@@ -113,12 +131,11 @@ export const ActionTimelineDrawer: React.FC<ActionTimelineDrawerProps> = ({
               background: 'transparent',
               border: 'none',
               color: tokens.colors.text.muted,
-              fontSize: '18px',
               cursor: 'pointer',
               padding: '4px'
             }}
           >
-            ✕
+            <CloseIcon size={16} />
           </button>
         </div>
 
@@ -129,7 +146,8 @@ export const ActionTimelineDrawer: React.FC<ActionTimelineDrawerProps> = ({
             gap: '4px',
             padding: '10px 16px',
             overflowX: 'auto',
-            borderBottom: `1px solid ${tokens.colors.border.subtle}`
+            borderBottom: `1px solid ${tokens.colors.border.subtle}`,
+            backgroundColor: tokens.colors.bg.subtle
           }}
         >
           {(['ALL', 'AI', 'VOICE', 'TOOLS', 'MEMORY', 'WINDOWS', 'ERRORS'] as TimelineFilter[]).map(cat => (
@@ -137,13 +155,13 @@ export const ActionTimelineDrawer: React.FC<ActionTimelineDrawerProps> = ({
               key={cat}
               onClick={() => setFilter(cat)}
               style={{
-                background: filter === cat ? tokens.colors.accent.cyanMuted : 'transparent',
-                border: `1px solid ${filter === cat ? tokens.colors.border.accent : 'transparent'}`,
-                borderRadius: tokens.radii.sm,
+                background: filter === cat ? tokens.colors.accent.primarySubtle : tokens.colors.bg.surface,
+                border: `1px solid ${filter === cat ? tokens.colors.border.accent : tokens.colors.border.subtle}`,
+                borderRadius: tokens.radii.xs,
                 padding: '3px 8px',
-                color: filter === cat ? tokens.colors.accent.cyan : tokens.colors.text.muted,
+                color: filter === cat ? tokens.colors.accent.primary : tokens.colors.text.muted,
                 fontSize: '10.5px',
-                fontWeight: 600,
+                fontFamily: tokens.typography.fontMono,
                 cursor: 'pointer',
                 whiteSpace: 'nowrap'
               }}
@@ -161,12 +179,12 @@ export const ActionTimelineDrawer: React.FC<ActionTimelineDrawerProps> = ({
             padding: '14px 16px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '10px'
+            gap: '8px'
           }}
         >
           {filteredEvents.length === 0 ? (
             <div style={{ textAlign: 'center', color: tokens.colors.text.muted, fontSize: tokens.typography.sizes.xs, marginTop: '40px' }}>
-              No events found for this filter.
+              No recorded events for this category.
             </div>
           ) : (
             filteredEvents.map(event => {
@@ -180,14 +198,15 @@ export const ActionTimelineDrawer: React.FC<ActionTimelineDrawerProps> = ({
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '4px',
-                    padding: '10px 12px',
-                    background: 'rgba(255, 255, 255, 0.02)',
+                    padding: '9px 12px',
+                    backgroundColor: tokens.colors.bg.elevated,
+                    border: `1px solid ${tokens.colors.border.subtle}`,
                     borderLeft: `2px solid ${categoryColor}`,
-                    borderRadius: `0 ${tokens.radii.sm} ${tokens.radii.sm} 0`
+                    borderRadius: tokens.radii.xs
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 600, fontSize: tokens.typography.sizes.xs, color: categoryColor }}>
+                    <span style={{ fontWeight: 600, fontSize: tokens.typography.sizes.xs, color: categoryColor, fontFamily: tokens.typography.fontMono }}>
                       {event.type.replace(/_/g, ' ')}
                     </span>
                     <span style={{ fontSize: '10px', color: tokens.colors.text.faint, fontFamily: tokens.typography.fontMono }}>
@@ -201,7 +220,7 @@ export const ActionTimelineDrawer: React.FC<ActionTimelineDrawerProps> = ({
                         fontSize: '11px',
                         color: tokens.colors.text.secondary,
                         fontFamily: tokens.typography.fontMono,
-                        background: 'rgba(0, 0, 0, 0.25)',
+                        background: 'rgba(0, 0, 0, 0.35)',
                         padding: '6px 8px',
                         borderRadius: tokens.radii.xs,
                         overflowX: 'auto',

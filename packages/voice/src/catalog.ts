@@ -3,13 +3,15 @@ import type {
   VoiceProviderId,
   TTSOptions,
   TTSSynthesisResult,
-  TTSProvider
+  TTSProvider,
+  EventType
 } from '@meghai/shared-types';
 import { WindowsSapiTTSProvider } from './providers/sapi-provider.js';
 import { WindowsOneCoreTTSProvider } from './providers/onecore-provider.js';
 import { GoogleCloudTTSProvider } from './providers/google-provider.js';
 import { ElevenLabsTTSProvider } from './providers/elevenlabs-provider.js';
 import { OpenAITTSProvider } from './providers/openai-tts-provider.js';
+import { globalVoiceDiagnostics } from './diagnostics.js';
 
 export interface VoiceFilterOptions {
   language?: string;
@@ -27,8 +29,13 @@ export class VoiceCatalogService {
   private providers: Map<string, TTSProvider> = new Map();
   private voiceCache: VoiceProfile[] = [];
   private initialized = false;
+  private eventBus?: { publish: (type: EventType, payload: any, correlationId?: string) => void };
 
-  constructor(customProviders?: TTSProvider[]) {
+  constructor(
+    customProviders?: TTSProvider[],
+    eventBus?: { publish: (type: EventType, payload: any, correlationId?: string) => void }
+  ) {
+    this.eventBus = eventBus;
     if (customProviders && customProviders.length > 0) {
       for (const p of customProviders) {
         this.providers.set(p.id, p);
@@ -49,6 +56,10 @@ export class VoiceCatalogService {
       this.providers.set('elevenlabs', eleven);
       this.providers.set('openai', openai);
     }
+  }
+
+  public registerProvider(provider: TTSProvider): void {
+    this.providers.set(provider.id, provider);
   }
 
   public async initialize(): Promise<VoiceProfile[]> {
@@ -161,34 +172,63 @@ export class VoiceCatalogService {
     );
   }
 
+  public setEventBus(bus: { publish: (type: EventType, payload: any, correlationId?: string) => void }): void {
+    this.eventBus = bus;
+  }
+
   public getProvider(id: string): TTSProvider | undefined {
     return this.providers.get(id);
   }
 
   public getProviderForVoice(voiceId: string): TTSProvider {
+    const id = (voiceId || '').toLowerCase().trim();
+
+    // 1. Direct Voice Profile lookup from cache or seed catalog
     const voice = this.getVoice(voiceId);
     if (voice) {
       const p = this.providers.get(voice.provider);
       if (p) return p;
     }
 
-    if (voiceId.startsWith('onecore-')) {
-      const p = this.providers.get('windows-onecore');
-      if (p) return p;
-    }
-    if (voiceId.startsWith('goog-')) {
-      const p = this.providers.get('google-cloud');
-      if (p) return p;
-    }
-    if (voiceId.startsWith('eleven-')) {
+    // 2. ElevenLabs prefix and catalog matching
+    if (id.startsWith('eleven-') || id.startsWith('elevenlabs-') || id.startsWith('eleven_')) {
       const p = this.providers.get('elevenlabs');
       if (p) return p;
     }
+
+    // Check if ID matches an ElevenLabs external ID or seed voice
+    const elevenProvider = this.providers.get('elevenlabs') as any;
+    if (elevenProvider && typeof elevenProvider.getElevenLabsCatalog === 'function') {
+      const elCatalog = elevenProvider.getElevenLabsCatalog() as VoiceProfile[];
+      if (elCatalog.some(v => v.id.toLowerCase() === id || v.style === voiceId || v.providerVoiceId === voiceId)) {
+        return elevenProvider;
+      }
+    }
+
+    // 3. Google Cloud prefix matching
+    if (id.startsWith('goog-') || id.startsWith('google-')) {
+      const p = this.providers.get('google-cloud');
+      if (p) return p;
+    }
+
+    // 4. OpenAI prefix and model name matching
     if (
-      voiceId.startsWith('openai-') ||
-      ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].includes(voiceId.toLowerCase())
+      id.startsWith('openai-') ||
+      ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'].includes(id)
     ) {
       const p = this.providers.get('openai');
+      if (p) return p;
+    }
+
+    // 5. Windows OneCore prefix matching
+    if (id.startsWith('onecore-')) {
+      const p = this.providers.get('windows-onecore');
+      if (p) return p;
+    }
+
+    // 6. Windows SAPI prefix matching
+    if (id.startsWith('sapi-') || id.startsWith('local-')) {
+      const p = this.providers.get('windows-sapi') || this.providers.get('local');
       if (p) return p;
     }
 
@@ -197,25 +237,57 @@ export class VoiceCatalogService {
   }
 
   /**
-   * Synthesize speech using the appropriate provider for the chosen voice with intelligent local fallback
+   * Synthesize speech using the appropriate provider for the chosen voice.
+   * If a cloud provider fails and allowFallback is enabled, triggers explicit fallback with events and diagnostics.
+   * If allowFallback is disabled, throws immediately without silent downgrade.
    */
   public async synthesize(text: string, options: TTSOptions = {}): Promise<TTSSynthesisResult> {
     const voiceId = options.voiceId || 'onecore-heera';
     const provider = this.getProviderForVoice(voiceId);
 
     try {
-      return await provider.synthesize(text, options);
+      const result = await provider.synthesize(text, options);
+      return {
+        ...result,
+        providerId: provider.id,
+        fallbackTriggered: false
+      };
     } catch (err: any) {
       console.warn(`[VoiceCatalog] Selected provider '${provider.id}' failed for voice '${voiceId}':`, err.message);
+
       // If a cloud provider failed, only fallback if allowed
       if (options.allowFallback ?? true) {
         if (provider.id === 'google-cloud' || provider.id === 'elevenlabs' || provider.id === 'openai') {
           const fallbackProvider = this.providers.get('windows-onecore') || this.providers.get('windows-sapi')!;
-          console.warn(`[VoiceCatalog] Explicit fallback to '${fallbackProvider.id}' (onecore-heera) for voice '${voiceId}'`);
-          return await fallbackProvider.synthesize(text, {
+          console.warn(`[VoiceCatalog] Explicit fallback triggered to '${fallbackProvider.id}' (onecore-heera) for voice '${voiceId}'. Reason: ${err.message}`);
+
+          // Publish explicit fallback events to EventBus so UI and logs are notified
+          const fallbackPayload = {
+            requestedVoiceId: voiceId,
+            originalVoiceId: voiceId,
+            requestedProvider: provider.id,
+            fallbackVoiceId: 'onecore-heera',
+            fallbackProvider: fallbackProvider.id,
+            reason: err.message
+          };
+          this.eventBus?.publish('TTS_FALLBACK_TRIGGERED', fallbackPayload);
+          this.eventBus?.publish('TTS_FALLBACK', fallbackPayload);
+
+          // Record in global structured diagnostics trail
+          globalVoiceDiagnostics.recordTtsFallback(fallbackProvider.id, 'onecore-heera', err.message);
+
+          const fallbackResult = await fallbackProvider.synthesize(text, {
             ...options,
             voiceId: 'onecore-heera'
           });
+
+          return {
+            ...fallbackResult,
+            providerId: fallbackProvider.id,
+            fallbackTriggered: true,
+            fallbackReason: err.message,
+            originalVoiceId: voiceId
+          };
         }
       }
       throw err;

@@ -18,14 +18,14 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   const getColor = (): string => {
     switch (state) {
       case 'LISTENING': return tokens.colors.state.listening;
-      case 'UNDERSTANDING': return tokens.colors.accent.purple;
+      case 'UNDERSTANDING': return tokens.colors.state.transcribing;
       case 'ROUTING':
       case 'PLANNING': return tokens.colors.state.routing;
       case 'EXECUTING': return tokens.colors.state.executing;
       case 'VERIFYING': return tokens.colors.state.verifying;
-      case 'RESPONDING': return tokens.colors.accent.cyan;
+      case 'RESPONDING': return tokens.colors.accent.primary;
       case 'SPEAKING': return tokens.colors.state.speaking;
-      case 'WAITING_FOR_CONFIRMATION': return tokens.colors.accent.amber;
+      case 'WAITING_FOR_CONFIRMATION': return tokens.colors.semantic.warning;
       case 'FAILED':
       case 'CANCELLED': return tokens.colors.state.failed;
       default: return tokens.colors.state.ready;

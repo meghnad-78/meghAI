@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { MemoryEntry } from '@meghai/shared-types';
+import { tokens } from '../theme/tokens.js';
+import { Icons } from './ui/Icons.js';
 
 export const MemoryCenter: React.FC = () => {
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
@@ -82,42 +84,83 @@ export const MemoryCenter: React.FC = () => {
   });
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', padding: '24px', overflowY: 'auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        padding: '28px 36px',
+        overflowY: 'auto',
+        maxWidth: '1100px',
+        margin: '0 auto',
+        width: '100%',
+        boxSizing: 'border-box'
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          marginBottom: '24px',
+          borderBottom: `1px solid ${tokens.colors.border.subtle}`,
+          paddingBottom: '20px'
+        }}
+      >
         <div>
-          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#f8fafc' }}>Memory Center</h2>
-          <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
-            Multi-layer long-term recall, behavioral candidate promotion, and locked memories.
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ color: tokens.colors.accent.primary, display: 'flex', alignItems: 'center' }}>
+              <Icons.Memory size={22} />
+            </span>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: tokens.typography.sizes.xl,
+                fontWeight: 600,
+                color: tokens.colors.text.primary,
+                letterSpacing: tokens.typography.letterSpacing.tight,
+                fontFamily: tokens.typography.fontDisplay
+              }}
+            >
+              Durable Memory Substrate
+            </h2>
+          </div>
+          <p style={{ margin: '6px 0 0', fontSize: tokens.typography.sizes.sm, color: tokens.colors.text.secondary }}>
+            Multi-layer contextual recall, behavioral candidate promotion, and immutable locked memories.
           </p>
         </div>
         <button
           onClick={loadMemories}
           style={{
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.12)',
-            color: '#38bdf8',
-            borderRadius: '8px',
+            background: tokens.colors.bg.surface,
+            border: `1px solid ${tokens.colors.border.default}`,
+            color: tokens.colors.text.secondary,
+            borderRadius: tokens.radii.xs,
             padding: '6px 14px',
             cursor: 'pointer',
-            fontSize: '12px'
+            fontSize: tokens.typography.sizes.xs,
+            fontFamily: tokens.typography.fontMono
           }}
         >
-          {isLoading ? 'Refreshing...' : '↻ Refresh'}
+          {isLoading ? 'REFRESHING...' : 'REFRESH'}
         </button>
       </div>
 
       {/* Add Memory Box */}
-      <div style={{
-        background: 'rgba(15, 23, 42, 0.65)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: '12px',
-        padding: '16px',
-        marginBottom: '20px'
-      }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '10px' }}>
-          + Store Permanent Memory
+      <div
+        style={{
+          background: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.default}`,
+          borderRadius: tokens.radii.md,
+          padding: '16px',
+          marginBottom: '20px'
+        }}
+      >
+        <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.text.secondary, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
+          Record Permanent Context
         </div>
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '8px' }}>
           <input
             type="text"
             placeholder="e.g. User prefers Python for backend and TypeScript for frontend."
@@ -125,24 +168,25 @@ export const MemoryCenter: React.FC = () => {
             onChange={e => setNewContent(e.target.value)}
             style={{
               flex: 1,
-              background: 'rgba(7, 9, 14, 0.6)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '8px',
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.sm,
               padding: '8px 12px',
-              color: '#f8fafc',
-              fontSize: '13px'
+              color: tokens.colors.text.primary,
+              fontSize: tokens.typography.sizes.sm,
+              outline: 'none'
             }}
           />
           <select
             value={newLayer}
             onChange={e => setNewLayer(e.target.value)}
             style={{
-              background: 'rgba(7, 9, 14, 0.6)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '8px',
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.sm,
               padding: '8px 12px',
-              color: '#cbd5e1',
-              fontSize: '13px'
+              color: tokens.colors.text.secondary,
+              fontSize: tokens.typography.sizes.xs
             }}
           >
             <option value="SEMANTIC">SEMANTIC</option>
@@ -155,12 +199,12 @@ export const MemoryCenter: React.FC = () => {
             value={newSensitivity}
             onChange={e => setNewSensitivity(e.target.value as any)}
             style={{
-              background: 'rgba(7, 9, 14, 0.6)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '8px',
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.sm,
               padding: '8px 12px',
-              color: '#cbd5e1',
-              fontSize: '13px'
+              color: tokens.colors.text.secondary,
+              fontSize: tokens.typography.sizes.xs
             }}
           >
             <option value="PUBLIC">PUBLIC</option>
@@ -171,56 +215,81 @@ export const MemoryCenter: React.FC = () => {
           <button
             onClick={handleAddMemory}
             style={{
-              background: 'linear-gradient(135deg, #00f0ff, #8a2be2)',
+              background: tokens.colors.accent.primary,
               border: 'none',
-              borderRadius: '8px',
+              borderRadius: tokens.radii.sm,
               padding: '8px 16px',
-              color: '#07090e',
-              fontWeight: 700,
-              fontSize: '12px',
-              cursor: 'pointer'
+              color: tokens.colors.bg.canvas,
+              fontWeight: 600,
+              fontSize: tokens.typography.sizes.xs,
+              cursor: 'pointer',
+              fontFamily: tokens.typography.fontMono
             }}
           >
-            Save
+            STORE
           </button>
         </div>
       </div>
 
       {/* Candidates for Promotion */}
       {candidates.length > 0 && (
-        <div style={{
-          background: 'rgba(245, 158, 11, 0.08)',
-          border: '1px solid rgba(245, 158, 11, 0.3)',
-          borderRadius: '12px',
-          padding: '16px',
-          marginBottom: '20px'
-        }}>
-          <div style={{ fontSize: '13px', fontWeight: 700, color: '#fbbf24', marginBottom: '8px' }}>
-            ★ Memory Candidates (Awaiting Promotion)
+        <div
+          style={{
+            background: tokens.colors.semantic.warningMuted,
+            border: `1px solid ${tokens.colors.semantic.warning}`,
+            borderRadius: tokens.radii.md,
+            padding: '16px',
+            marginBottom: '20px'
+          }}
+        >
+          <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.semantic.warning, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
+            Contextual Candidates (Awaiting Promotion)
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {candidates.map(c => (
-              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(15, 23, 42, 0.5)', padding: '8px 12px', borderRadius: '8px' }}>
+              <div
+                key={c.id}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: tokens.colors.bg.surface,
+                  border: `1px solid ${tokens.colors.border.subtle}`,
+                  padding: '10px 14px',
+                  borderRadius: tokens.radii.sm
+                }}
+              >
                 <div>
-                  <span style={{ fontSize: '11px', background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', padding: '2px 6px', borderRadius: '4px', marginRight: '8px' }}>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      background: tokens.colors.bg.elevated,
+                      color: tokens.colors.semantic.warning,
+                      padding: '2px 6px',
+                      borderRadius: tokens.radii.xs,
+                      marginRight: '8px',
+                      fontFamily: tokens.typography.fontMono
+                    }}
+                  >
                     {c.layer}
                   </span>
-                  <span style={{ fontSize: '13px', color: '#f1f5f9' }}>{c.content}</span>
+                  <span style={{ fontSize: tokens.typography.sizes.sm, color: tokens.colors.text.primary }}>{c.content}</span>
                 </div>
                 <button
                   onClick={() => handlePromoteCandidate(c.id)}
                   style={{
-                    background: '#10b981',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '4px 10px',
-                    color: '#07090e',
+                    background: tokens.colors.semantic.successMuted,
+                    border: `1px solid ${tokens.colors.semantic.success}`,
+                    borderRadius: tokens.radii.xs,
+                    padding: '5px 12px',
+                    color: tokens.colors.semantic.success,
                     fontWeight: 600,
-                    fontSize: '11px',
-                    cursor: 'pointer'
+                    fontSize: tokens.typography.sizes.xs,
+                    cursor: 'pointer',
+                    fontFamily: tokens.typography.fontMono
                   }}
                 >
-                  ✓ Promote to Durable
+                  PROMOTE
                 </button>
               </div>
             ))}
@@ -232,29 +301,30 @@ export const MemoryCenter: React.FC = () => {
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
         <input
           type="text"
-          placeholder="Search recalled memories..."
+          placeholder="Filter memories by keyword..."
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           style={{
             flex: 1,
-            background: 'rgba(15, 23, 42, 0.65)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '8px',
+            background: tokens.colors.bg.surface,
+            border: `1px solid ${tokens.colors.border.default}`,
+            borderRadius: tokens.radii.sm,
             padding: '8px 14px',
-            color: '#f8fafc',
-            fontSize: '13px'
+            color: tokens.colors.text.primary,
+            fontSize: tokens.typography.sizes.xs,
+            outline: 'none'
           }}
         />
         <select
           value={filterLayer}
           onChange={e => setFilterLayer(e.target.value)}
           style={{
-            background: 'rgba(15, 23, 42, 0.65)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '8px',
+            background: tokens.colors.bg.surface,
+            border: `1px solid ${tokens.colors.border.default}`,
+            borderRadius: tokens.radii.sm,
             padding: '8px 14px',
-            color: '#cbd5e1',
-            fontSize: '13px'
+            color: tokens.colors.text.secondary,
+            fontSize: tokens.typography.sizes.xs
           }}
         >
           <option value="ALL">All Layers</option>
@@ -267,19 +337,19 @@ export const MemoryCenter: React.FC = () => {
       </div>
 
       {/* Memory List */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {filteredMemories.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px', color: '#64748b', fontSize: '13px' }}>
-            No permanent memories found matching your criteria.
+          <div style={{ textAlign: 'center', padding: '40px', color: tokens.colors.text.muted, fontSize: tokens.typography.sizes.sm }}>
+            No permanent memories recorded matching criteria.
           </div>
         ) : (
           filteredMemories.map(m => (
             <div
               key={m.id}
               style={{
-                background: 'rgba(15, 23, 42, 0.65)',
-                border: '1px solid rgba(255, 255, 255, 0.06)',
-                borderRadius: '10px',
+                background: tokens.colors.bg.surface,
+                border: `1px solid ${tokens.colors.border.subtle}`,
+                borderRadius: tokens.radii.sm,
                 padding: '12px 16px',
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -288,22 +358,50 @@ export const MemoryCenter: React.FC = () => {
             >
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', fontWeight: 600 }}>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      padding: '2px 6px',
+                      borderRadius: tokens.radii.xs,
+                      background: tokens.colors.bg.elevated,
+                      color: tokens.colors.accent.primary,
+                      fontWeight: 600,
+                      fontFamily: tokens.typography.fontMono
+                    }}
+                  >
                     {m.type}
                   </span>
-                  <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(148, 163, 184, 0.15)', color: '#94a3b8' }}>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      padding: '2px 6px',
+                      borderRadius: tokens.radii.xs,
+                      background: tokens.colors.bg.subtle,
+                      color: tokens.colors.text.muted,
+                      fontFamily: tokens.typography.fontMono
+                    }}
+                  >
                     {m.sensitivity}
                   </span>
                   {m.locked && (
-                    <span style={{ fontSize: '10px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
-                      🔒 LOCKED
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        padding: '2px 6px',
+                        borderRadius: tokens.radii.xs,
+                        background: tokens.colors.semantic.errorMuted,
+                        color: tokens.colors.semantic.error,
+                        fontFamily: tokens.typography.fontMono
+                      }}
+                    >
+                      LOCKED
                     </span>
                   )}
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                  <span style={{ fontSize: '11px', color: tokens.colors.text.faint, fontFamily: tokens.typography.fontMono }}>
                     {new Date(m.createdAt).toLocaleDateString()}
                   </span>
                 </div>
-                <div style={{ fontSize: '13px', color: '#e2e8f0', lineHeight: '1.4' }}>
+                <div style={{ fontSize: tokens.typography.sizes.sm, color: tokens.colors.text.primary, lineHeight: '1.4' }}>
                   {m.content}
                 </div>
               </div>
@@ -311,16 +409,17 @@ export const MemoryCenter: React.FC = () => {
                 <button
                   onClick={() => handleToggleLock(m.id, Boolean(m.locked))}
                   style={{
-                    background: m.locked ? 'rgba(239, 68, 68, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-                    border: `1px solid ${m.locked ? 'rgba(239, 68, 68, 0.3)' : 'rgba(255, 255, 255, 0.1)'}`,
-                    color: m.locked ? '#f87171' : '#94a3b8',
-                    borderRadius: '6px',
+                    background: m.locked ? tokens.colors.semantic.errorMuted : tokens.colors.bg.subtle,
+                    border: `1px solid ${m.locked ? tokens.colors.semantic.error : tokens.colors.border.default}`,
+                    color: m.locked ? tokens.colors.semantic.error : tokens.colors.text.muted,
+                    borderRadius: tokens.radii.xs,
                     padding: '4px 10px',
                     fontSize: '11px',
-                    cursor: 'pointer'
+                    cursor: 'pointer',
+                    fontFamily: tokens.typography.fontMono
                   }}
                 >
-                  {m.locked ? 'Unlock' : 'Lock'}
+                  {m.locked ? 'UNLOCK' : 'LOCK'}
                 </button>
               </div>
             </div>

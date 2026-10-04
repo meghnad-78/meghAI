@@ -27,8 +27,8 @@ export class GoogleCloudTTSProvider implements TTSProvider {
   public readonly name = 'Google Cloud / Gemini Neural';
 
   public async listVoices(): Promise<VoiceProfile[]> {
-    const hasKey = Boolean(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_TTS_API_KEY']);
-    const reason = hasKey ? undefined : 'API key (GEMINI_API_KEY or GOOGLE_TTS_API_KEY) not configured';
+    const hasKey = Boolean(process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_CLOUD_API_KEY'] || process.env['GOOGLE_TTS_API_KEY']);
+    const reason = hasKey ? undefined : 'API key (GEMINI_API_KEY, GOOGLE_API_KEY, or GOOGLE_TTS_API_KEY) not configured';
 
     return this.getGoogleCatalog().map(v => ({
       ...v,
@@ -40,9 +40,9 @@ export class GoogleCloudTTSProvider implements TTSProvider {
   }
 
   public async synthesize(text: string, options: TTSOptions = {}): Promise<TTSSynthesisResult> {
-    const apiKey = process.env['GEMINI_API_KEY'] || process.env['GOOGLE_TTS_API_KEY'];
+    const apiKey = process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'] || process.env['GOOGLE_CLOUD_API_KEY'] || process.env['GOOGLE_TTS_API_KEY'];
     if (!apiKey) {
-      throw new Error('Google Cloud TTS requires GEMINI_API_KEY or GOOGLE_TTS_API_KEY to be configured.');
+      throw new Error('Google Cloud TTS requires GEMINI_API_KEY, GOOGLE_API_KEY, or GOOGLE_TTS_API_KEY to be configured.');
     }
 
     const cleanText = (text || '').trim();

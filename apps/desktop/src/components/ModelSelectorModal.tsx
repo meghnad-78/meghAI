@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { GlassSurface } from './ui/GlassSurface.js';
-import { Button } from './ui/Button.js';
-import { Badge } from './ui/Badge.js';
+import { ModelIcon, CheckIcon, CloseIcon } from './ui/Icons.js';
 import { tokens } from '../theme/tokens.js';
 
 export interface ModelProviderInfo {
@@ -108,29 +106,31 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(4, 6, 10, 0.78)',
+        backgroundColor: tokens.colors.bg.overlay,
         backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
         padding: '24px'
       }}
       onClick={onClose}
     >
-      <GlassSurface
-        elevation="floating"
+      <div
         style={{
           width: '100%',
-          maxWidth: '540px',
+          maxWidth: '560px',
           maxHeight: '85vh',
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'hidden',
-          borderRadius: tokens.radii.xl
+          backgroundColor: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.strong}`,
+          borderRadius: tokens.radii.lg,
+          overflow: 'hidden'
         }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div
           style={{
-            padding: '20px 24px 16px',
+            padding: '18px 24px 14px',
             borderBottom: `1px solid ${tokens.colors.border.subtle}`,
             display: 'flex',
             alignItems: 'center',
@@ -139,15 +139,26 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
         >
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: tokens.typography.sizes.lg, fontWeight: 700, color: tokens.colors.text.primary }}>
-                Active Intelligence Model
+              <ModelIcon size={16} color={tokens.colors.accent.primary} />
+              <span
+                style={{
+                  fontFamily: tokens.typography.fontDisplay,
+                  fontSize: tokens.typography.sizes.lg,
+                  fontWeight: 700,
+                  letterSpacing: '-0.02em',
+                  color: tokens.colors.text.primary
+                }}
+              >
+                Model Provider Routing
               </span>
               {loading && (
-                <span style={{ fontSize: '11px', color: tokens.colors.accent.cyan }}>● Checking...</span>
+                <span style={{ fontSize: '11px', color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
+                  ● Checking...
+                </span>
               )}
             </div>
             <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, marginTop: '2px' }}>
-              Select dedicated provider or let MeghAI orchestrate automatically
+              Directly routes typed and spoken commands to the selected provider
             </div>
           </div>
           <button
@@ -156,18 +167,16 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
               background: 'transparent',
               border: 'none',
               color: tokens.colors.text.muted,
-              fontSize: '18px',
               cursor: 'pointer',
-              padding: '4px 8px',
-              borderRadius: tokens.radii.sm
+              padding: '4px'
             }}
           >
-            ✕
+            <CloseIcon size={16} />
           </button>
         </div>
 
         {/* Provider List */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
           {standardProviders.map(p => {
             const isSelected = selectedProvider === p.id;
             const liveInfo = providers.find(item => item.id === p.id);
@@ -187,29 +196,59 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  padding: '12px 16px',
-                  borderRadius: tokens.radii.md,
+                  padding: '12px 14px',
+                  borderRadius: tokens.radii.sm,
                   border: `1px solid ${isSelected ? tokens.colors.border.accent : tokens.colors.border.subtle}`,
-                  background: isSelected
-                    ? 'rgba(0, 240, 255, 0.08)'
-                    : isConfigured
-                    ? 'rgba(255, 255, 255, 0.02)'
-                    : 'rgba(255, 255, 255, 0.005)',
+                  backgroundColor: isSelected ? tokens.colors.accent.primarySubtle : tokens.colors.bg.elevated,
                   cursor: isAuto || isConfigured ? 'pointer' : 'default',
-                  opacity: isAuto || isConfigured ? 1 : 0.5,
+                  opacity: isAuto || isConfigured ? 1 : 0.45,
                   transition: tokens.transitions.fast
                 }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 600, fontSize: tokens.typography.sizes.sm, color: isSelected ? tokens.colors.accent.cyan : tokens.colors.text.primary }}>
+                    <span
+                      style={{
+                        fontWeight: 600,
+                        fontSize: tokens.typography.sizes.sm,
+                        color: isSelected ? tokens.colors.accent.primary : tokens.colors.text.primary
+                      }}
+                    >
                       {p.name}
                     </span>
                     {isSelected && (
-                      <Badge variant="accent" size="sm">ACTIVE</Badge>
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          fontFamily: tokens.typography.fontMono,
+                          padding: '1px 5px',
+                          borderRadius: tokens.radii.xs,
+                          backgroundColor: tokens.colors.accent.primaryMuted,
+                          color: tokens.colors.accent.primary,
+                          border: `1px solid ${tokens.colors.border.accent}`,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px'
+                        }}
+                      >
+                        <CheckIcon size={10} />
+                        ACTIVE
+                      </span>
                     )}
                     {p.badge && (
-                      <Badge variant="purple" size="sm">{p.badge}</Badge>
+                      <span
+                        style={{
+                          fontSize: '9px',
+                          fontFamily: tokens.typography.fontMono,
+                          padding: '1px 5px',
+                          borderRadius: tokens.radii.xs,
+                          backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                          color: tokens.colors.text.muted,
+                          border: `1px solid ${tokens.colors.border.subtle}`
+                        }}
+                      >
+                        {p.badge}
+                      </span>
                     )}
                   </div>
                   <span style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted }}>
@@ -219,25 +258,31 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   {isAuto ? (
-                    <span style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.accent.cyan, fontWeight: 500 }}>
+                    <span style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
                       Dynamic
                     </span>
                   ) : isConfigured ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span
                         style={{
-                          width: '6px',
-                          height: '6px',
+                          width: '5px',
+                          height: '5px',
                           borderRadius: '50%',
-                          backgroundColor: isHealthy ? tokens.colors.accent.emerald : tokens.colors.accent.amber
+                          backgroundColor: isHealthy ? tokens.colors.semantic.success : tokens.colors.semantic.warning
                         }}
                       />
-                      <span style={{ fontSize: tokens.typography.sizes.xs, color: isHealthy ? tokens.colors.accent.emerald : tokens.colors.accent.amber }}>
+                      <span
+                        style={{
+                          fontSize: tokens.typography.sizes.xs,
+                          fontFamily: tokens.typography.fontMono,
+                          color: isHealthy ? tokens.colors.semantic.success : tokens.colors.semantic.warning
+                        }}
+                      >
                         {isHealthy ? (liveInfo?.health.latencyMs ? `${liveInfo.health.latencyMs}ms` : 'Ready') : 'Degraded'}
                       </span>
                     </div>
                   ) : (
-                    <span style={{ fontSize: '11px', color: tokens.colors.text.faint }}>
+                    <span style={{ fontSize: '11px', color: tokens.colors.text.faint, fontFamily: tokens.typography.fontMono }}>
                       Unconfigured
                     </span>
                   )}
@@ -250,29 +295,36 @@ export const ModelSelectorModal: React.FC<ModelSelectorModalProps> = ({
         {/* Footer */}
         <div
           style={{
-            padding: '14px 24px',
+            padding: '12px 24px',
             borderTop: `1px solid ${tokens.colors.border.subtle}`,
-            background: 'rgba(4, 6, 10, 0.4)',
+            backgroundColor: tokens.colors.bg.subtle,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between'
           }}
         >
           <span style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted }}>
-            Need to add or update API keys?
+            Configure API keys & inspect latency
           </span>
-          <Button
-            size="sm"
-            variant="ghost"
+          <button
             onClick={() => {
               onClose();
               if (onOpenProviderCenter) onOpenProviderCenter();
             }}
+            style={{
+              background: 'transparent',
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.xs,
+              padding: '4px 10px',
+              color: tokens.colors.text.secondary,
+              fontSize: tokens.typography.sizes.xs,
+              cursor: 'pointer'
+            }}
           >
             Open Provider Center →
-          </Button>
+          </button>
         </div>
-      </GlassSurface>
+      </div>
     </div>
   );
 };

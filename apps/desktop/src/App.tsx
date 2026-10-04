@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type { AIState, MeghAIEvent, MicrophoneState, VoiceInputState, OnlineSystemStatus } from '@meghai/shared-types';
 import { AICore } from './components/AICore.js';
+import { AmbientBackground } from './components/AmbientBackground.js';
 import { TopBar } from './components/TopBar.js';
 import { ChatView, type ChatMessage } from './components/ChatView.js';
 import { Composer } from './components/Composer.js';
@@ -18,6 +19,7 @@ import { RoutineCenter } from './components/RoutineCenter.js';
 import { ProviderCenter } from './components/ProviderCenter.js';
 import { PermissionCenter } from './components/PermissionCenter.js';
 import { tokens } from './theme/tokens.js';
+import { soundEngine } from './sound/soundEngine.js';
 
 export type ActiveTab =
   | 'home'
@@ -107,16 +109,30 @@ export const App: React.FC = () => {
     }
   });
 
-  // Global Keyboard Shortcuts (Ctrl+Space for Palette)
+  const hasPlayedStartupRef = useRef(false);
+
+  // Global Keyboard Shortcuts (Ctrl+Space for Palette) & First User Gesture for Sonic Engine
   useEffect(() => {
+    const handleFirstGesture = () => {
+      if (!hasPlayedStartupRef.current) {
+        hasPlayedStartupRef.current = true;
+        soundEngine.playStartup();
+      }
+    };
+    window.addEventListener('pointerdown', handleFirstGesture, { once: true });
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      handleFirstGesture();
       if (e.ctrlKey && e.code === 'Space') {
         e.preventDefault();
         setIsCommandPaletteOpen(prev => !prev);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handleFirstGesture);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
   // Connect to SSE Stream from MeghAI API Server
@@ -136,11 +152,20 @@ export const App: React.FC = () => {
           const mEvt = evt as MeghAIEvent;
           setEvents(prev => [mEvt, ...prev.slice(0, 99)]);
 
-          // Handle real native microphone and voice events
-          if (mEvt.type === 'MIC_STARTING') {
+          // Sound triggers and native microphone / voice events
+          if (mEvt.type === 'WAKE_DETECTED' || mEvt.type === 'WAKE_ACTIVATION_STARTED') {
+            soundEngine.playWake();
+          } else if (mEvt.type === 'MIC_STARTING') {
             setMicState('MIC_STARTING');
           } else if (mEvt.type === 'MIC_LISTENING') {
             setMicState('MIC_LISTENING');
+            soundEngine.playListening();
+          } else if (mEvt.type === 'MODEL_STARTED') {
+            soundEngine.startThinkingTexture();
+          } else if (mEvt.type === 'MODEL_COMPLETED') {
+            soundEngine.stopThinkingTexture();
+          } else if (mEvt.type === 'INTERRUPTED' || mEvt.type === 'KILL_SWITCH_ACTIVATED' || mEvt.type === 'TTS_INTERRUPTED') {
+            soundEngine.playInterruption();
           } else if (mEvt.type === 'MIC_LEVEL') {
             const payload = mEvt.payload as { normalizedLevel?: number; rms?: number; peak?: number };
             setMicLevel(payload?.normalizedLevel ?? 0);
@@ -207,6 +232,7 @@ export const App: React.FC = () => {
             }
           } else if (mEvt.type === 'TASK_COMPLETED') {
             setLiveTranscript(null);
+            soundEngine.playAnswerReady();
             const payload = mEvt.payload as {
               reply?: string;
               verificationStatus?: any;
@@ -236,6 +262,7 @@ export const App: React.FC = () => {
             }
           } else if (mEvt.type === 'TASK_FAILED' || mEvt.type === 'VOICE_MODEL_RATE_LIMITED') {
             setLiveTranscript(null);
+            soundEngine.playError();
             const payload = mEvt.payload as {
               reply?: string;
               error?: string;
@@ -256,6 +283,12 @@ export const App: React.FC = () => {
                 }
               ];
             });
+          } else if (mEvt.type === 'VOICE_NO_SPEECH_DETECTED') {
+            setLiveTranscript(null);
+            setAiState('READY');
+          } else if (mEvt.type === 'TTS_FALLBACK') {
+            const payload = mEvt.payload as { originalVoiceId?: string; fallbackVoiceId?: string; reason?: string };
+            console.warn(`[MeghAI TTS Fallback] Original: ${payload?.originalVoiceId} -> Fallback: ${payload?.fallbackVoiceId}. Reason: ${payload?.reason}`);
           } else if (mEvt.type === 'PERSONALITY_SETTINGS_CHANGED') {
             const payload = mEvt.payload as { activeProfile?: any };
             if (payload?.activeProfile) {
@@ -374,19 +407,29 @@ export const App: React.FC = () => {
     } catch {}
   };
 
-  const handleSelectVoice = async (voiceId: string) => {
+  const handleSelectVoice = async (voiceId: string, providerId?: string) => {
     setSelectedVoiceId(voiceId);
-    const cleanName = voiceId.replace(/^onecore-|^local-/, '');
+    const cleanName = voiceId.replace(/^onecore-|^local-|^eleven-|^goog-|^openai-/, '');
     setSelectedVoiceName(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
     try {
       localStorage.setItem('meghai_selected_voice_id', voiceId);
       localStorage.setItem('meghai_selected_voice_name', cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
     } catch {}
     try {
+      let provider = providerId;
+      if (!provider) {
+        if (voiceId.startsWith('eleven-') || voiceId.startsWith('elevenlabs-')) provider = 'elevenlabs';
+        else if (voiceId.startsWith('goog-') || voiceId.startsWith('google-')) provider = 'google-cloud';
+        else if (voiceId.startsWith('openai-')) provider = 'openai';
+        else if (voiceId.startsWith('onecore-') || voiceId.startsWith('sapi-') || voiceId.startsWith('local-')) provider = 'windows-onecore';
+      }
       await fetch('/api/v1/voice/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ selectedVoiceId: voiceId })
+        body: JSON.stringify({
+          selectedVoiceId: voiceId,
+          ...(provider ? { selectedProvider: provider } : {})
+        })
       });
     } catch {}
   };
@@ -462,6 +505,7 @@ export const App: React.FC = () => {
   };
 
   const handleEmergencyStop = async () => {
+    soundEngine.playInterruption();
     try {
       await fetch('/api/v1/system/kill', { method: 'POST' });
       setAiState('CANCELLED');
@@ -489,7 +533,11 @@ export const App: React.FC = () => {
     } else {
       setMicState('MIC_STARTING');
       try {
-        const res = await fetch('/api/v1/voice/mic/start', { method: 'POST' });
+        const res = await fetch('/api/v1/voice/mic/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'command', reason: 'User toggled microphone button' })
+        });
         const data = await res.json();
         if (res.ok) {
           setMicState(data.state || 'MIC_LISTENING');
@@ -516,6 +564,13 @@ export const App: React.FC = () => {
         position: 'relative'
       }}
     >
+      {/* Ambient Computational Physics Background */}
+      <AmbientBackground
+        aiState={aiState}
+        voiceInputState={voiceInputState}
+        micLevel={micLevel}
+      />
+
       {/* Master Top Bar */}
       <TopBar
         aiState={aiState}
@@ -547,7 +602,7 @@ export const App: React.FC = () => {
           flexDirection: 'column',
           position: 'relative',
           overflow: 'hidden',
-          background: 'radial-gradient(ellipse at 50% 12%, rgba(0, 240, 255, 0.04) 0%, rgba(4, 6, 10, 0) 65%)'
+          background: 'radial-gradient(ellipse at 50% 12%, rgba(79, 168, 181, 0.03) 0%, rgba(7, 8, 10, 0.4) 70%)'
         }}
       >
         {activeTab === 'home' && (

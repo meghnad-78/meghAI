@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { GraphEntityType } from '@meghai/knowledge-graph';
+import { tokens } from '../theme/tokens.js';
+import { Icons } from './ui/Icons.js';
 
 interface GraphNode {
   id: string;
@@ -71,52 +73,93 @@ export const KnowledgeCenter: React.FC = () => {
     : [];
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', padding: '24px', overflowY: 'auto' }}>
-      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div
+      style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        padding: '28px 36px',
+        overflowY: 'auto',
+        maxWidth: '1200px',
+        margin: '0 auto',
+        width: '100%',
+        boxSizing: 'border-box'
+      }}
+    >
+      <div
+        style={{
+          marginBottom: '24px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          borderBottom: `1px solid ${tokens.colors.border.subtle}`,
+          paddingBottom: '20px'
+        }}
+      >
         <div>
-          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#f8fafc' }}>Personal Knowledge Graph</h2>
-          <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#94a3b8' }}>
-            Structured graph linking people, projects, tasks, tools, files, and domains.
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ color: tokens.colors.accent.primary, display: 'flex', alignItems: 'center' }}>
+              <Icons.CompassNode size={22} />
+            </span>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: tokens.typography.sizes.xl,
+                fontWeight: 600,
+                color: tokens.colors.text.primary,
+                letterSpacing: tokens.typography.letterSpacing.tight,
+                fontFamily: tokens.typography.fontDisplay
+              }}
+            >
+              Personal Knowledge Graph
+            </h2>
+          </div>
+          <p style={{ margin: '6px 0 0', fontSize: tokens.typography.sizes.sm, color: tokens.colors.text.secondary }}>
+            Relational semantic graph linking entities, projects, tasks, tools, files, and domains.
           </p>
         </div>
         <button
           onClick={loadGraph}
           style={{
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.12)',
-            color: '#38bdf8',
-            borderRadius: '8px',
+            background: tokens.colors.bg.surface,
+            border: `1px solid ${tokens.colors.border.default}`,
+            color: tokens.colors.text.secondary,
+            borderRadius: tokens.radii.xs,
             padding: '6px 14px',
             cursor: 'pointer',
-            fontSize: '12px'
+            fontSize: tokens.typography.sizes.xs,
+            fontFamily: tokens.typography.fontMono
           }}
         >
-          ↻ Refresh
+          REFRESH
         </button>
       </div>
 
       {/* Add Entity Box */}
-      <div style={{
-        background: 'rgba(15, 23, 42, 0.65)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: '12px',
-        padding: '16px',
-        marginBottom: '20px'
-      }}>
-        <div style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1', marginBottom: '10px' }}>
-          + Add Entity to Knowledge Graph
+      <div
+        style={{
+          background: tokens.colors.bg.surface,
+          border: `1px solid ${tokens.colors.border.default}`,
+          borderRadius: tokens.radii.md,
+          padding: '16px',
+          marginBottom: '20px'
+        }}
+      >
+        <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.text.secondary, marginBottom: '10px', textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
+          Create Graph Entity
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
           <select
             value={newNodeType}
             onChange={e => setNewNodeType(e.target.value as any)}
             style={{
-              background: 'rgba(7, 9, 14, 0.6)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '8px',
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.sm,
               padding: '8px 12px',
-              color: '#cbd5e1',
-              fontSize: '13px'
+              color: tokens.colors.text.secondary,
+              fontSize: tokens.typography.sizes.xs
             }}
           >
             <option value="PROJECT">PROJECT</option>
@@ -133,42 +176,64 @@ export const KnowledgeCenter: React.FC = () => {
             onChange={e => setNewNodeLabel(e.target.value)}
             style={{
               flex: 1,
-              background: 'rgba(7, 9, 14, 0.6)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '8px',
+              background: tokens.colors.bg.subtle,
+              border: `1px solid ${tokens.colors.border.default}`,
+              borderRadius: tokens.radii.sm,
               padding: '8px 12px',
-              color: '#f8fafc',
-              fontSize: '13px'
+              color: tokens.colors.text.primary,
+              fontSize: tokens.typography.sizes.sm,
+              outline: 'none'
             }}
           />
           <button
             onClick={handleAddNode}
             style={{
-              background: 'linear-gradient(135deg, #00f0ff, #8a2be2)',
+              background: tokens.colors.accent.primary,
               border: 'none',
-              borderRadius: '8px',
+              borderRadius: tokens.radii.sm,
               padding: '8px 16px',
-              color: '#07090e',
-              fontWeight: 700,
-              fontSize: '12px',
-              cursor: 'pointer'
+              color: tokens.colors.bg.canvas,
+              fontWeight: 600,
+              fontSize: tokens.typography.sizes.xs,
+              cursor: 'pointer',
+              fontFamily: tokens.typography.fontMono
             }}
           >
-            Add Entity
+            INSERT ENTITY
           </button>
         </div>
       </div>
 
       {/* Main 2-Column Split: Graph Nodes + Neighborhood Inspector */}
-      <div style={{ display: 'flex', gap: '20px', flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: '16px', flex: 1, minHeight: 0 }}>
         {/* Left Column: Entities List */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(15, 23, 42, 0.55)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '16px', overflowY: 'auto' }}>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            background: tokens.colors.bg.surface,
+            border: `1px solid ${tokens.colors.border.default}`,
+            borderRadius: tokens.radii.md,
+            padding: '16px',
+            overflowY: 'auto'
+          }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1' }}>Entities ({filteredNodes.length})</span>
+            <span style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 600, color: tokens.colors.text.primary }}>
+              Entities ({filteredNodes.length})
+            </span>
             <select
               value={filterType}
               onChange={e => setFilterType(e.target.value)}
-              style={{ background: 'rgba(7, 9, 14, 0.6)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#cbd5e1', borderRadius: '6px', padding: '4px 8px', fontSize: '12px' }}
+              style={{
+                background: tokens.colors.bg.subtle,
+                border: `1px solid ${tokens.colors.border.default}`,
+                color: tokens.colors.text.secondary,
+                borderRadius: tokens.radii.xs,
+                padding: '4px 8px',
+                fontSize: tokens.typography.sizes.xs
+              }}
             >
               <option value="">All Types</option>
               <option value="USER">User</option>
@@ -179,7 +244,7 @@ export const KnowledgeCenter: React.FC = () => {
             </select>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {filteredNodes.map(node => {
               const isSelected = selectedNode?.id === node.id;
               return (
@@ -187,32 +252,37 @@ export const KnowledgeCenter: React.FC = () => {
                   key={node.id}
                   onClick={() => setSelectedNode(node)}
                   style={{
-                    background: isSelected ? 'rgba(0, 240, 255, 0.12)' : 'rgba(255, 255, 255, 0.03)',
-                    border: `1px solid ${isSelected ? '#00f0ff' : 'rgba(255, 255, 255, 0.06)'}`,
-                    borderRadius: '8px',
+                    background: isSelected ? tokens.colors.bg.elevated : tokens.colors.bg.subtle,
+                    border: `1px solid ${isSelected ? tokens.colors.accent.primary : tokens.colors.border.subtle}`,
+                    borderRadius: tokens.radii.sm,
                     padding: '10px 14px',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between'
+                    justifyContent: 'space-between',
+                    transition: tokens.transitions.fast
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{
-                      fontSize: '10px',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      background: 'rgba(138, 43, 226, 0.2)',
-                      color: '#c084fc',
-                      fontWeight: 700
-                    }}>
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        padding: '2px 6px',
+                        borderRadius: tokens.radii.xs,
+                        background: tokens.colors.bg.surface,
+                        border: `1px solid ${tokens.colors.border.default}`,
+                        color: tokens.colors.accent.primary,
+                        fontWeight: 600,
+                        fontFamily: tokens.typography.fontMono
+                      }}
+                    >
                       {node.type}
                     </span>
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc' }}>
+                    <span style={{ fontSize: tokens.typography.sizes.sm, fontWeight: 500, color: tokens.colors.text.primary }}>
                       {node.label}
                     </span>
                   </div>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>{node.id}</span>
+                  <span style={{ fontSize: '11px', color: tokens.colors.text.muted, fontFamily: tokens.typography.fontMono }}>{node.id}</span>
                 </div>
               );
             })}
@@ -220,34 +290,57 @@ export const KnowledgeCenter: React.FC = () => {
         </div>
 
         {/* Right Column: Node Details & Relationships */}
-        <div style={{ width: '380px', display: 'flex', flexDirection: 'column', background: 'rgba(15, 23, 42, 0.65)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '12px', padding: '16px', overflowY: 'auto' }}>
-          <div style={{ fontSize: '13px', fontWeight: 700, color: '#cbd5e1', marginBottom: '14px' }}>
+        <div
+          style={{
+            width: '400px',
+            display: 'flex',
+            flexDirection: 'column',
+            background: tokens.colors.bg.surface,
+            border: `1px solid ${tokens.colors.border.default}`,
+            borderRadius: tokens.radii.md,
+            padding: '16px',
+            overflowY: 'auto'
+          }}
+        >
+          <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.text.secondary, marginBottom: '14px', textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
             Entity Details & Neighborhood
           </div>
 
           {selectedNode ? (
             <div>
-              <div style={{ background: 'rgba(7, 9, 14, 0.6)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
-                <div style={{ fontSize: '15px', fontWeight: 700, color: '#00f0ff', marginBottom: '4px' }}>
+              <div
+                style={{
+                  background: tokens.colors.bg.subtle,
+                  border: `1px solid ${tokens.colors.border.default}`,
+                  borderRadius: tokens.radii.sm,
+                  padding: '12px',
+                  marginBottom: '16px'
+                }}
+              >
+                <div style={{ fontSize: tokens.typography.sizes.md, fontWeight: 600, color: tokens.colors.text.primary, marginBottom: '4px', fontFamily: tokens.typography.fontDisplay }}>
                   {selectedNode.label}
                 </div>
-                <div style={{ fontSize: '11px', color: '#94a3b8' }}>Type: {selectedNode.type}</div>
-                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>ID: {selectedNode.id}</div>
+                <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.accent.primary, fontFamily: tokens.typography.fontMono }}>
+                  Type: {selectedNode.type}
+                </div>
+                <div style={{ fontSize: '11px', color: tokens.colors.text.muted, marginTop: '2px', fontFamily: tokens.typography.fontMono }}>
+                  ID: {selectedNode.id}
+                </div>
                 {selectedNode.properties && Object.keys(selectedNode.properties).length > 0 && (
-                  <div style={{ marginTop: '8px', fontSize: '11px', color: '#cbd5e1' }}>
-                    <pre style={{ margin: 0, padding: '6px', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '4px', overflowX: 'auto' }}>
+                  <div style={{ marginTop: '8px', fontSize: '11px' }}>
+                    <pre style={{ margin: 0, padding: '8px', background: tokens.colors.bg.canvas, border: `1px solid ${tokens.colors.border.subtle}`, borderRadius: tokens.radii.xs, overflowX: 'auto', fontFamily: tokens.typography.fontMono, color: tokens.colors.text.secondary }}>
                       {JSON.stringify(selectedNode.properties, null, 2)}
                     </pre>
                   </div>
                 )}
               </div>
 
-              <div style={{ fontSize: '12px', fontWeight: 600, color: '#94a3b8', marginBottom: '8px', textTransform: 'uppercase' }}>
+              <div style={{ fontSize: tokens.typography.sizes.xs, fontWeight: 600, color: tokens.colors.text.muted, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: tokens.typography.letterSpacing.wide }}>
                 Connected Relationships ({nodeNeighbors.length})
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {nodeNeighbors.length === 0 ? (
-                  <div style={{ fontSize: '12px', color: '#64748b', padding: '12px 0' }}>
+                  <div style={{ fontSize: tokens.typography.sizes.xs, color: tokens.colors.text.muted, padding: '12px 0' }}>
                     No direct relationship edges connected to this entity yet.
                   </div>
                 ) : (
@@ -259,17 +352,17 @@ export const KnowledgeCenter: React.FC = () => {
                       <div
                         key={edge.id}
                         style={{
-                          background: 'rgba(255, 255, 255, 0.03)',
-                          border: '1px solid rgba(255, 255, 255, 0.06)',
-                          borderRadius: '6px',
+                          background: tokens.colors.bg.subtle,
+                          border: `1px solid ${tokens.colors.border.subtle}`,
+                          borderRadius: tokens.radii.xs,
                           padding: '8px 10px',
-                          fontSize: '12px'
+                          fontSize: tokens.typography.sizes.xs
                         }}
                       >
-                        <div style={{ color: '#38bdf8', fontWeight: 600 }}>
-                          {isOutgoing ? `→ ${edge.relationship} →` : `← ${edge.relationship} ←`}
+                        <div style={{ color: tokens.colors.accent.primary, fontWeight: 600, fontFamily: tokens.typography.fontMono }}>
+                          {isOutgoing ? `-> ${edge.relationship} ->` : `<- ${edge.relationship} <-`}
                         </div>
-                        <div style={{ color: '#f8fafc', marginTop: '2px', fontWeight: 500 }}>
+                        <div style={{ color: tokens.colors.text.primary, marginTop: '2px', fontWeight: 500 }}>
                           {otherNode ? otherNode.label : otherNodeId}
                         </div>
                       </div>
@@ -279,8 +372,8 @@ export const KnowledgeCenter: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div style={{ color: '#64748b', fontSize: '12px', textAlign: 'center', marginTop: '40px' }}>
-              Select an entity on the left to inspect its graph neighborhood.
+            <div style={{ color: tokens.colors.text.muted, fontSize: tokens.typography.sizes.xs, textAlign: 'center', marginTop: '40px' }}>
+              Select an entity to inspect its graph neighborhood.
             </div>
           )}
         </div>
